@@ -1,0 +1,22 @@
+# Python
+backend/venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Env / secrets
+.env
+backend/.env
+
+# Database
+backend/data/*.db
+backend/data/*.db-journal
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/

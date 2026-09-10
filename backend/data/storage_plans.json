@@ -1,0 +1,11 @@
+{
+  "region": "IN",
+  "currency": "INR",
+  "disclaimer": "Pricing shown for estimation only. Verify current Google One pricing before purchase.",
+  "plans": [
+    { "name": "Free", "storage_gb": 15, "price_monthly": 0 },
+    { "name": "Google One Basic", "storage_gb": 100, "price_monthly": 130 },
+    { "name": "Google One Standard", "storage_gb": 200, "price_monthly": 210 },
+    { "name": "Google One Premium", "storage_gb": 2048, "price_monthly": 650 }
+  ]
+}
