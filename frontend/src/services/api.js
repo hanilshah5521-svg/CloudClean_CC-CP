@@ -29,17 +29,28 @@ async function request(path, options = {}) {
 export const api = {
   // Auth
   demoLogin: () => request("/auth/demo", { method: "POST" }),
-  googleAuthUrl: () => request("/auth/google/url"),
+  // Full-page navigation (not fetch): the server stores OAuth state + PKCE
+  // verifier in the session cookie, then redirects to Google.
+  googleLoginUrl: `${BASE_URL}/auth/google/login`,
   logout: () => request("/auth/logout", { method: "POST" }),
   getUser: () => request("/api/user"),
+  // Which sign-in options the server offers (Google configured? Gmail requested?)
+  getAuthStatus: () => request("/auth/status"),
 
   // Storage
   getStorage: () => request("/api/storage"),
   getSavings: () => request("/api/savings"),
 
-  // Analysis
+  // Analysis — returns a background job (Demo Mode: already finished)
   analyze: () => request("/api/analyze", { method: "POST" }),
   getAnalysis: () => request("/api/analysis"),
+
+  // Background jobs
+  getJob: (jobId) => request(`/api/jobs/${jobId}`),
+  listJobs: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/jobs${qs ? `?${qs}` : ""}`);
+  },
 
   // Recommendations
   getRecommendations: () => request("/api/recommendations"),
@@ -56,15 +67,27 @@ export const api = {
 
   // Duplicates
   getDuplicates: () => request("/api/duplicates"),
-  trashDuplicates: (groupId, keepDriveId) =>
+  trashDuplicates: (groupId, keepDriveId, acknowledgeDifferentContent = false) =>
     request(`/api/duplicates/${groupId}/trash`, {
       method: "POST",
-      body: JSON.stringify({ keep_drive_id: keepDriveId }),
+      body: JSON.stringify({ keep_drive_id: keepDriveId, acknowledge_different_content: acknowledgeDifferentContent }),
     }),
 
   // Compression
   getCompressionCandidates: () => request("/api/compression/candidates"),
   compressFile: (fileId) => request(`/api/compression/${fileId}`, { method: "POST" }),
+  getVideoCandidates: () => request("/api/compression/video-candidates"),
+  compressVideo: (fileId) => request(`/api/compression/${fileId}/video`, { method: "POST" }),
+
+  // Auto-compression rules
+  getRules: () => request("/api/rules"),
+  createRule: (body) => request("/api/rules", { method: "POST", body: JSON.stringify(body) }),
+  updateRule: (ruleId, body) => request(`/api/rules/${ruleId}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteRule: (ruleId) => request(`/api/rules/${ruleId}`, { method: "DELETE" }),
+  runRules: () => request("/api/rules/run", { method: "POST" }),
+  getSuggestions: (status = "open") => request(`/api/rules/suggestions?status=${status}`),
+  applySuggestion: (id) => request(`/api/rules/suggestions/${id}/apply`, { method: "POST" }),
+  dismissSuggestion: (id) => request(`/api/rules/suggestions/${id}/dismiss`, { method: "POST" }),
 
   // Archive
   archiveFiles: (fileIds, archiveName) =>
@@ -73,13 +96,30 @@ export const api = {
       body: JSON.stringify({ file_ids: fileIds, archive_name: archiveName }),
     }),
 
+  // Organize (group files by naming convention into folders)
+  getOrganizeSuggestions: () => request("/api/organize"),
+  applyOrganize: (id, folderName) =>
+    request(`/api/organize/${id}/apply`, { method: "POST", body: JSON.stringify({ folder_name: folderName }) }),
+  dismissOrganize: (id) => request(`/api/organize/${id}/dismiss`, { method: "POST" }),
+
+  // Gmail
+  getGmail: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/api/gmail${qs ? `?${qs}` : ""}`);
+  },
+  trashGmail: (messageIds) =>
+    request("/api/gmail/trash", { method: "POST", body: JSON.stringify({ message_ids: messageIds }) }),
+
   // History
   getHistory: () => request("/api/history"),
+  // Undoing a large/video compression returns { job_id, job } — poll it.
   restoreAction: (actionId) => request(`/api/history/${actionId}/restore`, { method: "POST" }),
+  // Permanently delete a compressed file's kept original version (no Undo after).
+  freeSpace: (actionId) => request(`/api/history/${actionId}/free-space`, { method: "POST" }),
 
   // Settings
   getSettings: () => request("/api/settings"),
   updateSettings: (body) => request("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
 };
 
-export { ApiError, BASE_URL };
+export { ApiError, BASE_URL, request };

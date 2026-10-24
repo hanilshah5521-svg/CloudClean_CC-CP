@@ -1,20 +1,32 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { FlaskConical, HardDrive, KeyRound, TriangleAlert } from "lucide-react";
 import { api } from "../services/api.js";
 import { useUser } from "../hooks/useUser.jsx";
+import { Button } from "../components/ui/button.jsx";
+import { Notice } from "../components/ui/primitives.jsx";
+import ThemeToggle from "../components/ThemeToggle.jsx";
 
-const ERROR_MESSAGES = {
+export const CONNECT_ERRORS = {
   oauth_failed: "Google sign-in failed. Please try again.",
   missing_code: "Google didn't return an authorization code. Please try again.",
   access_denied: "You declined the requested permissions — CloudClean needs Drive access to analyze your storage.",
+  state_mismatch: "That sign-in link was stale or didn't start here. Please try connecting again.",
+  not_configured: "Google sign-in isn't set up on this server yet — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env and restart the backend.",
 };
 
+/** Standalone screen for signed-out visitors. */
 export default function Connect() {
   const [params] = useSearchParams();
+  const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(params.get("error") ? ERROR_MESSAGES[params.get("error")] || "Something went wrong." : null);
+  const [error, setError] = useState(params.get("error") ? CONNECT_ERRORS[params.get("error")] || "Something went wrong." : null);
   const navigate = useNavigate();
   const { refresh } = useUser();
+
+  useEffect(() => {
+    api.getAuthStatus().then(setStatus, () => setStatus({ google_configured: false, gmail_enabled: false }));
+  }, []);
 
   async function startDemo() {
     setBusy(true);
@@ -28,52 +40,66 @@ export default function Connect() {
     }
   }
 
-  async function startGoogle() {
-    setBusy(true);
-    try {
-      const { url } = await api.googleAuthUrl();
-      window.location.href = url;
-    } catch (e) {
-      setError(e.message);
-      setBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    if (params.get("demo") === "1") startDemo();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-      <div className="max-w-md w-full bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
-        <div className="h-10 w-10 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold mb-4">C</div>
-        <h1 className="text-xl font-semibold text-slate-900 mb-2">Connect your Google Drive</h1>
-        <p className="text-sm text-slate-500 mb-5">
-          CloudClean requests Drive access so it can read your file metadata, and — only when you
-          explicitly approve an action — upload optimized replacements and move originals to Trash.
-          It never deletes anything permanently or reads file content without your request.
-        </p>
+    <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
+      <div className="w-full max-w-[880px]">
+        <div className="mb-6 flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded bg-ink text-canvas">
+            <HardDrive className="h-4 w-4" strokeWidth={2} />
+          </div>
+          <span className="text-[17px] font-semibold text-ink">CloudClean</span>
+          <span className="ml-2 hidden text-[13px] text-sub sm:inline">Storage optimization for Google Drive, Gmail and AWS S3</span>
+          <ThemeToggle className="ml-auto" />
+        </div>
 
-        {error && <div className="mb-4 text-sm text-red-600 bg-red-50 rounded-lg p-3">{error}</div>}
+        {error && (
+          <Notice tone="bad" icon={TriangleAlert} className="mb-4">
+            {error}
+          </Notice>
+        )}
 
-        <button
-          onClick={startGoogle}
-          disabled={busy}
-          className="w-full px-4 py-3 rounded-xl bg-brand-600 text-white font-semibold hover:bg-brand-700 disabled:opacity-60 mb-3"
-        >
-          {busy ? "Connecting…" : "Connect Google Drive"}
-        </button>
-        <button
-          onClick={startDemo}
-          disabled={busy}
-          className="w-full px-4 py-3 rounded-xl bg-white text-slate-700 font-semibold border border-slate-200 hover:bg-slate-50 disabled:opacity-60"
-        >
-          Try Demo Mode instead
-        </button>
-        <p className="text-xs text-slate-400 mt-4 text-center">
-          Demo Mode uses simulated Drive data — no Google account required, nothing real is touched.
-        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <section className="rounded-lg border border-line bg-surface p-5">
+            <div className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+              <KeyRound className="h-4 w-4 text-accent-ink" /> Connect your Google account
+            </div>
+            <ul className="mt-3 space-y-1.5 text-[12px] text-sub">
+              <li><span className="mono text-ink">drive</span> — read file metadata; replace, move or trash files only when you confirm</li>
+              {status?.gmail_enabled && <li><span className="mono text-ink">gmail.modify</span> — optional: list large emails, move them to Gmail Trash</li>}
+              <li>Nothing is ever permanently deleted without a separate confirmation.</li>
+            </ul>
+            {status && !status.google_configured && (
+              <Notice tone="warn" icon={TriangleAlert} className="mt-4">
+                {CONNECT_ERRORS.not_configured}
+              </Notice>
+            )}
+            <Button
+              variant="primary"
+              size="lg"
+              className="mt-4 w-full"
+              disabled={busy || !status?.google_configured}
+              onClick={() => {
+                setBusy(true);
+                window.location.href = api.googleLoginUrl;
+              }}
+            >
+              Connect Google Drive
+            </Button>
+          </section>
+
+          <section className="rounded-lg border border-line bg-surface p-5">
+            <div className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+              <FlaskConical className="h-4 w-4 text-warn" /> Demo Mode
+            </div>
+            <p className="mt-3 text-[12px] text-sub">
+              A simulated account: <span className="mono text-ink">105</span> Drive files, <span className="mono text-ink">36</span> large
+              emails and four S3 buckets — with duplicates, oversized videos and untiered data to clean up. Nothing real is touched.
+            </p>
+            <Button size="lg" className="mt-4 w-full" disabled={busy} onClick={startDemo}>
+              Try Demo Mode
+            </Button>
+          </section>
+        </div>
       </div>
     </div>
   );

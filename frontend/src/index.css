@@ -2,10 +2,159 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+@layer base {
+  /* Theme tokens as "R G B" channels (see tailwind.config.js). Light is the
+     default; html.dark — set from the theme toggle or the OS setting — swaps
+     in warm graphite surfaces. Fills stay saturated enough for white text;
+     *-ink colors are the readable text versions. */
+  :root {
+    color-scheme: light;
+    --canvas: 246 244 239;
+    --panel: 240 238 233;
+    --surface: 255 255 255;
+    --line: 228 224 216;
+    --line-strong: 201 195 183;
+    --track: 236 233 226;
+    --ink: 27 26 23;
+    --sub: 95 91 83;
+    --faint: 138 133 123;
+    --scrim: 27 26 23;
+    --shade: 27 26 23;
+    --accent: 31 79 216;
+    --accent-hover: 25 65 181;
+    --accent-soft: 233 238 251;
+    --accent-ink: 31 79 216;
+    --ok: 15 138 95;
+    --ok-ink: 11 107 74;
+    --ok-soft: 229 243 236;
+    --warn: 199 119 0;
+    --warn-ink: 143 86 0;
+    --warn-soft: 251 240 222;
+    --bad: 200 50 43;
+    --bad-ink: 163 39 31;
+    --bad-soft: 249 231 229;
+    --info: 100 116 139;
+    --info-ink: 74 85 102;
+    --info-soft: 238 241 245;
+    --tier-drive: 31 79 216;
+    --tier-trash: 199 119 0;
+    --tier-gmail: 139 92 246;
+    --tier-s3: 15 138 95;
+    /* S3 storage classes: stronger = pricier / more frequently accessed. */
+    --cls-standard: 11 94 65;
+    --cls-rrs: 95 91 83;
+    --cls-intelligent: 15 138 95;
+    --cls-ia: 63 165 127;
+    --cls-onezone: 109 187 156;
+    --cls-glacier-ir: 150 207 184;
+    --cls-glacier: 188 226 210;
+    --cls-deep: 215 238 227;
+  }
+  .dark {
+    color-scheme: dark;
+    --canvas: 20 19 17;
+    --panel: 26 25 22;
+    --surface: 30 29 26;
+    --line: 47 45 41;
+    --line-strong: 74 71 64;
+    --track: 42 40 36;
+    --ink: 237 234 227;
+    --sub: 171 166 153;
+    --faint: 126 121 111;
+    --scrim: 0 0 0;
+    --shade: 0 0 0;
+    --accent: 61 107 234;
+    --accent-hover: 85 128 240;
+    --accent-soft: 28 37 64;
+    --accent-ink: 140 168 247;
+    --ok: 19 151 106;
+    --ok-ink: 91 203 156;
+    --ok-soft: 19 42 33;
+    --warn: 208 130 12;
+    --warn-ink: 235 180 94;
+    --warn-soft: 46 36 20;
+    --bad: 217 67 59;
+    --bad-ink: 242 145 138;
+    --bad-soft: 51 27 25;
+    --info: 133 146 166;
+    --info-ink: 182 192 207;
+    --info-soft: 34 39 48;
+    --tier-drive: 61 107 234;
+    --tier-trash: 208 130 12;
+    --tier-gmail: 155 120 248;
+    --tier-s3: 19 151 106;
+    --cls-standard: 70 196 147;
+    --cls-rrs: 138 133 123;
+    --cls-intelligent: 47 164 122;
+    --cls-ia: 35 133 95;
+    --cls-onezone: 29 107 77;
+    --cls-glacier-ir: 25 86 63;
+    --cls-glacier: 22 69 51;
+    --cls-deep: 19 56 41;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    font-size: 14px;
+    letter-spacing: -0.015em;
+  }
+  /* Every number, size, hash, ID and JSON is monospaced with tabular digits. */
+  code,
+  pre,
+  kbd,
+  .mono {
+    font-family: theme("fontFamily.mono");
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+  }
 }
 
-.input {
-  @apply w-full px-3 py-2 rounded-lg border border-slate-200 text-sm;
+@layer components {
+  /* Tactility: border/colour shift on hover, 1px press on click — no scaling. */
+  .tactile {
+    transition: border-color 120ms, background-color 120ms, color 120ms, transform 60ms;
+  }
+  .tactile:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .field {
+    @apply h-8 w-full rounded border border-line bg-surface px-2.5 text-[13px] text-ink placeholder:text-faint
+      focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/15;
+  }
+  .th {
+    @apply h-8 whitespace-nowrap px-3 text-left text-[11px] font-medium uppercase tracking-[0.04em] text-faint;
+  }
+  .td {
+    @apply h-9 whitespace-nowrap px-3 align-middle;
+  }
+  .stripes {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.35) 25%,
+      transparent 25%,
+      transparent 50%,
+      rgba(255, 255, 255, 0.35) 50%,
+      rgba(255, 255, 255, 0.35) 75%,
+      transparent 75%
+    );
+    background-size: 12px 12px;
+    animation: stripes 0.8s linear infinite;
+  }
+}
+
+@keyframes stripes {
+  to {
+    background-position: 12px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stripes {
+    animation: none;
+  }
 }

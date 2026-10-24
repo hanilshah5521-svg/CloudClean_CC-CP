@@ -1,20 +1,48 @@
 services:
   backend:
+    image: cloudclean-backend
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
     ports:
       - "8000:8000"
-    environment:
+    environment: &backend_env
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/callback}
-      - SECRET_KEY=${SECRET_KEY:-dev-only-insecure-secret-change-me}
+      # Blank = a random key is generated once and kept in the data volume.
+      - SECRET_KEY=${SECRET_KEY:-}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - GMAIL_ENABLED=${GMAIL_ENABLED:-true}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
       - DATABASE_URL=sqlite:///./data/cloudclean.db
+      - RULES_HOUR_UTC=${RULES_HOUR_UTC:-21}
+      - RULES_MAX_AUTO_APPLY=${RULES_MAX_AUTO_APPLY:-3}
+      - VIDEO_CRF=${VIDEO_CRF:-27}
+      - VIDEO_THREADS=${VIDEO_THREADS:-2}
+      - VIDEO_MAX_MB=${VIDEO_MAX_MB:-4096}
     volumes:
       - cloudclean_data:/app/data
     restart: unless-stopped
+
+  # Background jobs: analysis, video re-encoding (ffmpeg), large restores and
+  # the nightly auto-compression rules. Same image, settings and data volume
+  # (SQLite) as the API. Run exactly one.
+  worker:
+    image: cloudclean-backend
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    command: ["python", "-m", "app.worker"]
+    environment: *backend_env
+    volumes:
+      - cloudclean_data:/app/data
+    depends_on:
+      - backend
+    restart: unless-stopped
+    # A job cut off by a stop is marked failed (never silently half-applied)
+    # when the worker starts again; History keeps the original's revision.
+    stop_grace_period: 30s
 
   frontend:
     build:

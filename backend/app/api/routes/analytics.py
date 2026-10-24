@@ -44,7 +44,7 @@ def breakdown(user: User = Depends(get_current_user), db: Session = Depends(get_
             inactive_by_bucket["30+ days"] += size
 
     duplicate_bytes = 0
-    for g in db.query(DuplicateGroup).filter(DuplicateGroup.user_id == user.id).all():
+    for g in db.query(DuplicateGroup).filter(DuplicateGroup.user_id == user.id, DuplicateGroup.match_level != "name").all():
         active = [f for f in g.files if not f.is_trashed]
         if len(active) < 2:
             continue

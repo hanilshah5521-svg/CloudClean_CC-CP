@@ -1,137 +1,129 @@
 import { useEffect, useState } from "react";
-import {
-  ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, LineChart, Line, Legend,
-} from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { ChartColumn } from "lucide-react";
 import { api } from "../services/api.js";
-import Card from "../components/Card.jsx";
-import { Loading, EmptyState } from "../components/Loading.jsx";
+import { useScan } from "../context/scan.jsx";
+import { useTheme } from "../context/theme.jsx";
+import { DriveTrashNotice } from "../components/GoogleLinks.jsx";
+import { Card, EmptyState, FilterPills, PageHeader, SkeletonRows, Stat } from "../components/ui/primitives.jsx";
 import { formatBytes, formatDate } from "../utils/format.js";
 
-const COLORS = ["#2563eb", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#64748b"];
 const RANGES = [{ value: "7d", label: "7 days" }, { value: "30d", label: "30 days" }, { value: "90d", label: "90 days" }, { value: "all", label: "All time" }];
+const BUCKETS = ["30+ days", "90+ days", "180+ days", "1+ year", "2+ years"];
+const GB = 1024 ** 3;
+const MB = 1024 ** 2;
 
-export default function Analytics() {
-  const [loading, setLoading] = useState(true);
-  const [breakdown, setBreakdown] = useState(null);
-  const [history, setHistory] = useState(null);
-  const [storage, setStorage] = useState(null);
-  const [range, setRange] = useState("30d");
-
-  useEffect(() => {
-    Promise.all([api.getBreakdown(), api.getStorageHistory(range), api.getStorage()]).then(([b, h, s]) => {
-      setBreakdown(b);
-      setHistory(h);
-      setStorage(s);
-      setLoading(false);
-    });
-  }, [range]);
-
-  if (loading) return <Loading label="Loading analytics…" />;
-
-  const categoryData = breakdown.by_category.map((c) => ({ name: c.category, value: c.size_bytes, count: c.count }));
-  const inactiveData = Object.entries(breakdown.inactive_by_bucket).map(([bucket, bytes]) => ({ bucket, bytes: bytes / (1024 ** 2) }));
-  const largestData = breakdown.largest_files.map((f) => ({ name: f.name.length > 18 ? f.name.slice(0, 16) + "…" : f.name, mb: f.size_bytes / (1024 ** 2) }));
-  const historyData = (history.points || []).map((p) => ({
-    date: new Date(p.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    "Used (GB)": +(p.used_bytes / 1024 ** 3).toFixed(2),
-    "Recoverable (GB)": +(p.recoverable_bytes / 1024 ** 3).toFixed(2),
-  }));
-
+function ChartTip({ active, payload, label, unit = "GB" }) {
+  if (!active || !payload?.length) return null;
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Analytics</h1>
-          <p className="text-sm text-slate-500">Every chart here is built from real analysis runs — nothing is fabricated.</p>
+    <div className="rounded border border-line bg-surface px-2.5 py-1.5 text-[12px] shadow-[0_4px_16px_rgb(var(--shade)/0.08)]">
+      <div className="mb-0.5 text-sub">{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="mono text-ink">
+          {p.name}: {p.value.toFixed(2)} {unit}
         </div>
-        <select value={range} onChange={(e) => setRange(e.target.value)} className="px-3 py-2 rounded-lg border border-slate-200 text-sm">
-          {RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-        </select>
-      </div>
-
-      <Card title="Storage Usage Over Time" subtitle="Recorded at each analysis run">
-        {history.insufficient_history ? (
-          <EmptyState title="Not enough history yet" subtitle="Run at least two analyses over time to see a trend here." />
-        ) : (
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={historyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="Used (GB)" stroke="#2563eb" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="Recoverable (GB)" stroke="#10b981" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </Card>
-
-      <div className="grid lg:grid-cols-2 gap-5">
-        <Card title="Storage by File Type">
-          {categoryData.length === 0 ? <EmptyState title="No data" /> : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={categoryData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(d) => d.name}>
-                  {categoryData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                </Pie>
-                <Tooltip formatter={(v) => formatBytes(v)} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
-
-        <Card title="Largest Files">
-          {largestData.length === 0 ? <EmptyState title="No data" /> : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={largestData} layout="vertical" margin={{ left: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis type="number" tick={{ fontSize: 12 }} unit=" MB" />
-                <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v) => `${v.toFixed(1)} MB`} />
-                <Bar dataKey="mb" fill="#2563eb" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
-      </div>
-
-      <div className="grid lg:grid-cols-2 gap-5">
-        <Card title="Potentially Inactive Storage" subtitle="By how long the file has gone unmodified">
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={inactiveData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 12 }} unit=" MB" />
-              <Tooltip formatter={(v) => `${v.toFixed(0)} MB`} />
-              <Bar dataKey="bytes" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-
-        <Card title="Recovery Opportunity" subtitle="Duplicate storage vs. compressible storage">
-          <div className="space-y-4 py-4">
-            <Opportunity label="Duplicate storage" bytes={breakdown.duplicate_storage_bytes} total={storage.used_bytes} color="bg-amber-500" />
-            <Opportunity label="Compressible storage" bytes={breakdown.compressible_storage_bytes} total={storage.used_bytes} color="bg-brand-600" />
-          </div>
-        </Card>
-      </div>
+      ))}
     </div>
   );
 }
 
-function Opportunity({ label, bytes, total, color }) {
-  const pct = total > 0 ? Math.min(100, (bytes / total) * 100) : 0;
+export default function Analytics() {
+  const [range, setRange] = useState("30d");
+  const [data, setData] = useState(null);
+  const { version } = useScan();
+  const { colors: c } = useTheme();
+
+  useEffect(() => {
+    Promise.all([api.getBreakdown(), api.getStorageHistory(range), api.getStorage()]).then(
+      ([breakdown, history, storage]) => setData({ breakdown, history, storage }),
+      () => setData({ error: true }),
+    );
+  }, [range, version]);
+
+  if (!data) return <Card bodyClassName="p-0"><SkeletonRows rows={8} /></Card>;
+  if (data.error) return <Card><EmptyState icon={ChartColumn} title="Analytics unavailable" subtitle="Run a scan first." /></Card>;
+  const { breakdown, history, storage } = data;
+
+  const byType = [...breakdown.by_category].sort((a, b) => b.size_bytes - a.size_bytes).map((c) => ({ name: c.category, GB: c.size_bytes / GB, count: c.count }));
+  const largest = breakdown.largest_files.map((f) => ({ name: f.name.length > 22 ? `${f.name.slice(0, 20)}…` : f.name, MB: f.size_bytes / MB }));
+  const inactive = BUCKETS.map((b) => ({ name: b, GB: (breakdown.inactive_by_bucket[b] || 0) / GB }));
+  const trend = (history.points || []).map((p) => ({ date: formatDate(p.date), Used: p.used_bytes / GB, Recoverable: p.recoverable_bytes / GB }));
+  const AXIS = { fontFamily: "JetBrains Mono", fontSize: 11, fill: c.faint };
+  const LABEL = { ...AXIS, fill: c.sub };
+  const oldBytes = (breakdown.inactive_by_bucket["1+ year"] || 0) + (breakdown.inactive_by_bucket["2+ years"] || 0);
+
   return (
-    <div>
-      <div className="flex justify-between text-sm mb-1">
-        <span className="text-slate-600">{label}</span>
-        <span className="font-semibold text-slate-800">{formatBytes(bytes)} ({pct.toFixed(1)}%)</span>
+    <div className="space-y-4">
+      <PageHeader title="Analytics" description="Built from your analysis runs — nothing here is estimated beyond what each label says." />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Duplicate copies" value={formatBytes(breakdown.duplicate_storage_bytes)} />
+        <Stat label="Est. compressible" value={formatBytes(breakdown.compressible_storage_bytes)} />
+        <Stat label="Not modified 1+ year" value={formatBytes(oldBytes)} />
+        <Stat label="In Drive Trash" value={formatBytes(storage.drive_trash_bytes)} tone={storage.drive_trash_bytes ? "warn" : undefined} sub="auto-emptied after 30 days" />
       </div>
-      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-        <div className={`h-full ${color}`} style={{ width: `${pct}%` }} />
+
+      {storage.drive_trash_bytes > 0 && (
+        <DriveTrashNotice>
+          <span className="mono">{formatBytes(storage.drive_trash_bytes)}</span> in Drive&apos;s Trash still counts toward your quota. Google deletes each item 30
+          days after it was trashed; emptying the Trash in Drive frees it sooner.
+        </DriveTrashNotice>
+      )}
+
+      <Card title="Storage over time" subtitle="Recorded at each analysis run" action={<FilterPills options={RANGES} value={range} onChange={setRange} />}>
+        {history.insufficient_history ? (
+          <EmptyState title="Not enough history yet" subtitle="Run at least two scans over time to see a trend." />
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={trend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke={c.track} vertical={false} />
+              <XAxis dataKey="date" tick={AXIS} axisLine={false} tickLine={false} />
+              <YAxis tick={AXIS} axisLine={false} tickLine={false} width={44} unit=" GB" />
+              <Tooltip content={<ChartTip />} />
+              <Area type="monotone" dataKey="Used" stroke={c.tierDrive} fill={c.tierDrive} fillOpacity={0.08} strokeWidth={1.5} />
+              <Area type="monotone" dataKey="Recoverable" stroke={c.ok} fill={c.ok} fillOpacity={0.08} strokeWidth={1.5} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card title="Size by file type">
+          <ResponsiveContainer width="100%" height={Math.max(160, byType.length * 30)}>
+            <BarChart data={byType} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke={c.track} horizontal={false} />
+              <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} unit=" GB" />
+              <YAxis type="category" dataKey="name" tick={LABEL} axisLine={false} tickLine={false} width={96} />
+              <Tooltip content={<ChartTip />} cursor={{ fill: c.canvas }} />
+              <Bar dataKey="GB" name="Size" fill={c.tierDrive} barSize={14} radius={[0, 2, 2, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card title="Inactive data" subtitle="By time since last modified">
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={inactive} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke={c.track} vertical={false} />
+              <XAxis dataKey="name" tick={AXIS} axisLine={false} tickLine={false} />
+              <YAxis tick={AXIS} axisLine={false} tickLine={false} width={44} unit=" GB" />
+              <Tooltip content={<ChartTip />} cursor={{ fill: c.canvas }} />
+              <Bar dataKey="GB" name="Size" fill={c.warn} barSize={28} radius={[2, 2, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
       </div>
+
+      <Card title="Largest files">
+        <ResponsiveContainer width="100%" height={Math.max(160, largest.length * 28)}>
+          <BarChart data={largest} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke={c.track} horizontal={false} />
+            <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} unit=" MB" />
+            <YAxis type="category" dataKey="name" tick={LABEL} axisLine={false} tickLine={false} width={170} />
+            <Tooltip content={<ChartTip unit="MB" />} cursor={{ fill: c.canvas }} />
+            <Bar dataKey="MB" name="Size" fill={c.sub} barSize={12} radius={[0, 2, 2, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
     </div>
   );
 }

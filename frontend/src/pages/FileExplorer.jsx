@@ -1,73 +1,115 @@
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Archive, ArrowDown, ArrowUp, ArrowUpDown, Copy, Film, FolderTree, Search, X } from "lucide-react";
 import { api } from "../services/api.js";
+import { useScan } from "../context/scan.jsx";
+import { useDrawer } from "../context/drawer.jsx";
 import { useToast } from "../hooks/useToast.jsx";
-import Card from "../components/Card.jsx";
-import ConfirmDialog from "../components/ConfirmDialog.jsx";
-import { Loading, EmptyState } from "../components/Loading.jsx";
-import { formatBytes, formatDate, monthsAgo } from "../utils/format.js";
+import { useGoogleLinks } from "../hooks/useGoogleLinks.js";
+import { DriveTrashNotice } from "../components/GoogleLinks.jsx";
+import { Button } from "../components/ui/button.jsx";
+import { Badge, Card, EmptyState, FilterPills, PageHeader, SkeletonRows } from "../components/ui/primitives.jsx";
+import { Checkbox, Tip } from "../components/ui/controls.jsx";
+import { ConfirmDialog } from "../components/ui/dialog.jsx";
+import BatchDock from "../components/shell/BatchDock.jsx";
+import { fileDetails, REC_STATUS } from "../components/details.js";
+import { formatBytes, formatDate } from "../utils/format.js";
 
 const FILTERS = [
-  { value: "", label: "All files" },
+  { value: "", label: "All" },
   { value: "large", label: "Large" },
   { value: "duplicate", label: "Duplicate" },
   { value: "compressible", label: "Compressible" },
-  { value: "inactive", label: "Inactive" },
+  { value: "inactive", label: "Inactive (90+ days)" },
   { value: "archive_candidate", label: "Archive candidate" },
-  { value: "optimized", label: "Already optimized" },
+  { value: "optimized", label: "Optimized" },
 ];
-
-const REC_BADGE = {
-  compress: "bg-brand-50 text-brand-700", duplicate: "bg-amber-50 text-amber-700",
-  archive: "bg-purple-50 text-purple-700", already_optimized: "bg-emerald-50 text-emerald-700",
-  keep: "bg-slate-100 text-slate-500",
-};
+const PAGE_SIZE = 50;
 
 export default function FileExplorer() {
   const [params, setParams] = useSearchParams();
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState({ files: [], total: 0 });
-  const [search, setSearch] = useState("");
-  const [sort, setSort] = useState("size");
-  const [order, setOrder] = useState("desc");
-  const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState(new Set());
-  const [confirmArchive, setConfirmArchive] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const toast = useToast();
-
   const filter = params.get("filter") || "";
+  const search = params.get("search") || "";
+  const [sort, setSort] = useState({ by: "size", order: "desc" });
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState(null);
+  const [selected, setSelected] = useState(new Map()); // id -> file
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [archived, setArchived] = useState(null); // last archive: originals now in Drive's Trash
+  const { version } = useScan();
+  const { open, close } = useDrawer();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const links = useGoogleLinks();
 
-  async function load() {
-    setLoading(true);
-    const res = await api.getFiles({ search, filter, sort, order, page, page_size: 25 });
-    setData(res);
-    setLoading(false);
-  }
+  const load = useCallback(async () => {
+    setData(null);
+    setData(await api.getFiles({ search, filter, sort: sort.by, order: sort.order, page, page_size: PAGE_SIZE }));
+  }, [search, filter, sort, page]);
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, sort, order, page]);
+    load().catch((e) => {
+      toast(e.message, "error");
+      setData({ files: [], total: 0 });
+    });
+  }, [load, version, toast]);
 
-  function toggleSelect(id) {
+  useEffect(() => setPage(1), [filter, search, sort]);
+
+  function setParam(key, value) {
+    const next = new URLSearchParams(params);
+    value ? next.set(key, value) : next.delete(key);
+    setParams(next);
+  }
+
+  function toggleSort(by) {
+    setSort((s) => (s.by === by ? { by, order: s.order === "desc" ? "asc" : "desc" } : { by, order: "desc" }));
+  }
+
+  function toggle(file) {
     setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      const next = new Map(prev);
+      next.has(file.id) ? next.delete(file.id) : next.set(file.id, file);
       return next;
     });
   }
 
-  const selectedFiles = data.files.filter((f) => selected.has(f.id));
-  const selectedTotal = selectedFiles.reduce((s, f) => s + f.size_bytes, 0);
+  async function compress(file) {
+    const res = await api.compressFile(file.id);
+    toast(res.message, res.success ? "success" : "error");
+    close();
+    await load();
+  }
 
-  async function doArchive() {
+  function openFile(f) {
+    const actions = [];
+    if (f.recommendation_type === "compress") {
+      actions.push(
+        f.category === "video"
+          ? { label: "Open video queue", variant: "primary", icon: Film, onClick: () => navigate("/compression") }
+          : { label: "Compress now", variant: "primary", icon: Film, onClick: () => compress(f) },
+      );
+    }
+    if (f.duplicate_group_id) actions.push({ label: "View duplicate group", icon: Copy, onClick: () => navigate("/duplicates") });
+    open(fileDetails(f, actions, links));
+  }
+
+  async function archive() {
     setBusy(true);
     try {
-      const res = await api.archiveFiles(Array.from(selected), `cloudclean_archive_${Date.now()}.zip`);
-      toast(`Archived ${selectedFiles.length} files — saved ${formatBytes(res.saved_bytes)}.`);
-      setSelected(new Set());
-      setConfirmArchive(false);
+      const files = [...selected.values()];
+      const res = await api.archiveFiles(files.map((f) => f.id), `cloudclean_archive_${new Date().toISOString().slice(0, 10)}.zip`);
+      toast(
+        res.failed?.length
+          ? `Archive created, but ${res.failed.length} original(s) couldn't be moved to Trash. See History.`
+          : `Archived ${files.length} files into ${res.archive_name} — saves ${formatBytes(res.saved_bytes)} once Trash is emptied.`,
+        res.failed?.length ? "error" : "success",
+      );
+      const moved = files.length - (res.failed?.length || 0);
+      if (moved > 0) setArchived({ count: moved, bytes: res.saved_bytes });
+      setSelected(new Map());
+      setConfirming(false);
       await load();
     } catch (e) {
       toast(e.message, "error");
@@ -76,124 +118,153 @@ export default function FileExplorer() {
     }
   }
 
-  async function quickCompress(fileId) {
-    try {
-      const res = await api.compressFile(fileId);
-      toast(res.success ? `Saved ${formatBytes(res.saved_bytes)}.` : res.message, res.success ? "success" : "error");
-      await load();
-    } catch (e) {
-      toast(e.message, "error");
-    }
-  }
+  const files = data?.files || [];
+  const selectable = files.filter((f) => !f.is_google_workspace_file);
+  const allChecked = selectable.length > 0 && selectable.every((f) => selected.has(f.id));
+  const selectedBytes = [...selected.values()].reduce((s, f) => s + f.size_bytes, 0);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">File Explorer</h1>
-        <p className="text-sm text-slate-500">Search, filter, and take action on individual files.</p>
+    <div className="space-y-4">
+      <PageHeader title="File Explorer" description="Every file in your Drive that CloudClean analyzed. Select rows to archive them into one ZIP." />
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <FilterPills options={FILTERS} value={filter} onChange={(v) => setParam("filter", v)} />
+        <form
+          role="search"
+          className="relative w-full sm:w-64"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setParam("search", new FormData(e.currentTarget).get("q").trim());
+          }}
+        >
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+          <input key={search} name="q" defaultValue={search} placeholder="Filter by name" aria-label="Filter files by name" className="field pl-8 pr-7" />
+          {search && (
+            <button type="button" onClick={() => setParam("search", "")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-faint hover:text-ink">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </form>
       </div>
 
-      <Card>
-        <div className="flex flex-wrap items-center gap-3 mb-4">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && (setPage(1), load())}
-            placeholder="Search files by name…"
-            className="flex-1 min-w-[200px] px-3 py-2 rounded-lg border border-slate-200 text-sm"
-          />
-          <select
-            value={filter}
-            onChange={(e) => { setParams(e.target.value ? { filter: e.target.value } : {}); setPage(1); }}
-            className="px-3 py-2 rounded-lg border border-slate-200 text-sm"
-          >
-            {FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-          </select>
-          <select value={sort} onChange={(e) => setSort(e.target.value)} className="px-3 py-2 rounded-lg border border-slate-200 text-sm">
-            <option value="size">Sort: Size</option>
-            <option value="modified">Sort: Modified</option>
-            <option value="savings">Sort: Potential savings</option>
-            <option value="name">Sort: Name</option>
-          </select>
-          <button onClick={() => setOrder(order === "desc" ? "asc" : "desc")} className="px-3 py-2 rounded-lg border border-slate-200 text-sm">
-            {order === "desc" ? "↓ Desc" : "↑ Asc"}
-          </button>
-        </div>
+      {archived && (
+        <DriveTrashNotice>
+          Moved <span className="mono">{archived.count}</span> archived original{archived.count === 1 ? "" : "s"} to Drive&apos;s Trash.{" "}
+          <span className="mono">{formatBytes(archived.bytes)}</span> still counts against your storage until the Trash is emptied (Google
+          does it after 30 days).
+        </DriveTrashNotice>
+      )}
 
-        {selected.size > 0 && (
-          <div className="flex items-center justify-between bg-brand-50 rounded-xl px-4 py-3 mb-4">
-            <span className="text-sm font-medium text-brand-800">
-              {selected.size} file{selected.size === 1 ? "" : "s"} selected · {formatBytes(selectedTotal)}
-            </span>
-            <button onClick={() => setConfirmArchive(true)} className="px-4 py-1.5 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">
-              Archive Selected
-            </button>
-          </div>
-        )}
-
-        {loading ? <Loading /> : data.files.length === 0 ? (
-          <EmptyState title="No files match" subtitle="Try a different filter or search term." />
+      <Card bodyClassName="p-0">
+        {!data ? (
+          <SkeletonRows rows={10} cols={6} />
+        ) : files.length === 0 ? (
+          <EmptyState icon={FolderTree} title="No files match" subtitle="Try another filter or search, or run a scan first." />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-slate-400 uppercase tracking-wide">
-                  <th className="py-2 pr-2"><input type="checkbox" onChange={(e) => setSelected(e.target.checked ? new Set(data.files.map((f) => f.id)) : new Set())} /></th>
-                  <th className="py-2 pr-4">Name</th>
-                  <th className="py-2 pr-4">Type</th>
-                  <th className="py-2 pr-4">Size</th>
-                  <th className="py-2 pr-4">Modified</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Potential Saving</th>
-                  <th className="py-2">Action</th>
+            <table className="w-full text-[13px]">
+              <thead className="border-b border-line">
+                <tr>
+                  <th className="th w-8">
+                    <Checkbox
+                      label="Select all on this page"
+                      checked={allChecked}
+                      onChange={(on) =>
+                        setSelected((prev) => {
+                          const next = new Map(prev);
+                          selectable.forEach((f) => (on ? next.set(f.id, f) : next.delete(f.id)));
+                          return next;
+                        })
+                      }
+                    />
+                  </th>
+                  <SortTh label="Name" by="name" sort={sort} onSort={toggleSort} />
+                  <th className="th">Type</th>
+                  <SortTh label="Size" by="size" sort={sort} onSort={toggleSort} right />
+                  <SortTh label="Modified" by="modified" sort={sort} onSort={toggleSort} />
+                  <th className="th">Status</th>
+                  <SortTh label="Saving" by="savings" sort={sort} onSort={toggleSort} right />
                 </tr>
               </thead>
-              <tbody>
-                {data.files.map((f) => (
-                  <tr key={f.id} className="border-t border-slate-100">
-                    <td className="py-2 pr-2"><input type="checkbox" checked={selected.has(f.id)} onChange={() => toggleSelect(f.id)} /></td>
-                    <td className="py-2 pr-4 max-w-[240px] truncate font-medium text-slate-800">{f.name}</td>
-                    <td className="py-2 pr-4 text-slate-500">{f.category}</td>
-                    <td className="py-2 pr-4 text-slate-600">{formatBytes(f.size_bytes)}</td>
-                    <td className="py-2 pr-4 text-slate-400">{formatDate(f.modified_time)} <span className="text-xs">({monthsAgo(f.inactivity_days)})</span></td>
-                    <td className="py-2 pr-4">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${REC_BADGE[f.recommendation_type] || REC_BADGE.keep}`}>
-                        {f.recommendation_type.replace("_", " ")}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-4 text-emerald-700 font-medium">{f.estimated_savings_bytes ? formatBytes(f.estimated_savings_bytes) : "—"}</td>
-                    <td className="py-2">
-                      {f.recommendation_type === "compress" && (
-                        <button onClick={() => quickCompress(f.id)} className="text-brand-600 text-xs font-semibold hover:underline">Compress</button>
-                      )}
-                      {f.duplicate_group_id && <span className="text-amber-600 text-xs font-semibold">See Duplicates</span>}
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-line">
+                {files.map((f) => {
+                  const status = REC_STATUS[f.recommendation_type] || REC_STATUS.keep;
+                  return (
+                    <tr key={f.id} onClick={() => openFile(f)} className="cursor-pointer hover:bg-canvas">
+                      <td className="td w-8">
+                        {f.is_google_workspace_file ? (
+                          <Tip content="Google Docs/Sheets/Slides have no file content to put in a ZIP.">
+                            <span><Checkbox label={`Select ${f.name}`} disabled /></span>
+                          </Tip>
+                        ) : (
+                          <Checkbox label={`Select ${f.name}`} checked={selected.has(f.id)} onChange={() => toggle(f)} />
+                        )}
+                      </td>
+                      <td className="td max-w-[340px]">
+                        <div className="truncate font-medium text-ink">{f.name}</div>
+                        {f.folder_path && <div className="truncate text-[11px] text-faint">{f.folder_path}</div>}
+                      </td>
+                      <td className="td mono text-[12px] text-sub">{f.extension || f.category}</td>
+                      <td className="td mono text-right">{formatBytes(f.size_bytes)}</td>
+                      <td className="td whitespace-nowrap text-sub">{formatDate(f.modified_time)}</td>
+                      <td className="td"><Badge tone={status.tone}>{status.label}</Badge></td>
+                      <td className="td mono text-right text-ok-ink">{f.estimated_savings_bytes ? formatBytes(f.estimated_savings_bytes) : <span className="text-faint">—</span>}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
-
-        <div className="flex items-center justify-between mt-4 text-sm text-slate-500">
-          <span>{data.total} total files</span>
-          <div className="flex gap-2">
-            <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="px-3 py-1 rounded-lg border border-slate-200 disabled:opacity-40">Prev</button>
-            <span className="px-2 py-1">Page {page}</span>
-            <button disabled={page * 25 >= data.total} onClick={() => setPage((p) => p + 1)} className="px-3 py-1 rounded-lg border border-slate-200 disabled:opacity-40">Next</button>
+        {data && data.total > 0 && (
+          <div className="flex items-center justify-between border-t border-line px-4 py-2 text-[12px] text-sub">
+            <span>
+              <span className="mono">{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, data.total)}</span> of <span className="mono">{data.total}</span> files
+            </span>
+            <div className="flex gap-1">
+              <Button size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+              <Button size="sm" disabled={page * PAGE_SIZE >= data.total} onClick={() => setPage((p) => p + 1)}>Next</Button>
+            </div>
           </div>
-        </div>
+        )}
       </Card>
 
+      <BatchDock
+        count={selected.size}
+        bytes={selectedBytes}
+        actionLabel="Archive to ZIP"
+        actionIcon={Archive}
+        onAction={() => setConfirming(true)}
+        onClear={() => setSelected(new Map())}
+      />
+
       <ConfirmDialog
-        open={confirmArchive}
-        title="Archive selected files?"
-        body={`${selected.size} file(s), ${formatBytes(selectedTotal)} total, will be bundled into a ZIP and uploaded to Drive. Originals are only moved to Trash after the archive upload is verified.`}
+        open={confirming}
+        title={`Archive ${selected.size} file${selected.size === 1 ? "" : "s"} into one ZIP?`}
+        description={`${formatBytes(selectedBytes)} in total. The ZIP is uploaded and verified before any original is touched.`}
+        consequences={[
+          { kind: "undoable", text: "Originals move to Drive's Trash — restore each from History & Restore." },
+          { kind: "permanent", text: "Google empties Drive's Trash after 30 days; after that only the ZIP remains." },
+          { kind: "info", text: "Links and sharing of the originals don't carry over to the ZIP." },
+        ]}
         confirmLabel="Archive"
         busy={busy}
-        onConfirm={doArchive}
-        onCancel={() => setConfirmArchive(false)}
+        onConfirm={archive}
+        onCancel={() => setConfirming(false)}
       />
     </div>
+  );
+}
+
+function SortTh({ label, by, sort, onSort, right }) {
+  const active = sort.by === by;
+  const Icon = !active ? ArrowUpDown : sort.order === "desc" ? ArrowDown : ArrowUp;
+  return (
+    <th className={`th ${right ? "text-right" : ""}`}>
+      <button onClick={() => onSort(by)} className={`inline-flex items-center gap-1 uppercase ${active ? "text-ink" : ""}`}>
+        {label}
+        <Icon className="h-3 w-3" />
+      </button>
+    </th>
   );
 }

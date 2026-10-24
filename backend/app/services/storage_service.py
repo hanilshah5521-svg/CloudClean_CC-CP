@@ -8,7 +8,9 @@ from functools import lru_cache
 from sqlalchemy.orm import Session
 
 from app.core.config import DATA_DIR
-from app.models import DriveFile, StorageSnapshot, User
+from app.models import StorageSnapshot, User
+
+FREE_QUOTA_BYTES = 15 * 1024 ** 3
 
 
 @lru_cache
@@ -21,17 +23,20 @@ def storage_overview(db: Session, user: User) -> dict:
     snapshot = (
         db.query(StorageSnapshot)
         .filter(StorageSnapshot.user_id == user.id)
-        .order_by(StorageSnapshot.created_at.desc())
+        .order_by(StorageSnapshot.created_at.desc(), StorageSnapshot.id.desc())
         .first()
     )
     if not snapshot:
         return {
-            "used_bytes": 0, "quota_bytes": 15 * 1024 ** 3, "used_percent": 0.0,
-            "remaining_bytes": 15 * 1024 ** 3, "recoverable_bytes": 0,
+            "used_bytes": 0, "quota_bytes": FREE_QUOTA_BYTES, "used_percent": 0.0,
+            "remaining_bytes": FREE_QUOTA_BYTES, "recoverable_bytes": 0,
             "projected_used_bytes": 0, "projected_used_percent": 0.0,
+            "drive_bytes": 0, "drive_trash_bytes": 0, "gmail_photos_bytes": 0,
         }
     used, quota, recoverable = snapshot.used_bytes, snapshot.quota_bytes, snapshot.recoverable_bytes
-    projected = max(0, used - recoverable)
+    # What's left once recommendations are applied AND Drive's Trash has
+    # emptied (both trashed duplicates and what was already in Trash).
+    projected = max(0, used - recoverable - snapshot.drive_trash_bytes)
     return {
         "used_bytes": used, "quota_bytes": quota,
         "used_percent": round(used / quota * 100, 1) if quota else 0.0,
@@ -39,6 +44,12 @@ def storage_overview(db: Session, user: User) -> dict:
         "recoverable_bytes": recoverable,
         "projected_used_bytes": projected,
         "projected_used_percent": round(projected / quota * 100, 1) if quota else 0.0,
+        # Where the shared quota goes. Drive's Trash still counts until it is
+        # emptied (automatically after 30 days); Google reports Gmail and
+        # Photos only as one combined number.
+        "drive_bytes": snapshot.drive_bytes,
+        "drive_trash_bytes": snapshot.drive_trash_bytes,
+        "gmail_photos_bytes": snapshot.gmail_photos_bytes,
     }
 
 

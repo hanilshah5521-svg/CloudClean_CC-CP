@@ -1,124 +1,107 @@
 import { useEffect, useState } from "react";
+import { Save } from "lucide-react";
 import { api } from "../services/api.js";
 import { useToast } from "../hooks/useToast.jsx";
-import { useUser } from "../hooks/useUser.jsx";
-import Card from "../components/Card.jsx";
-import { Loading } from "../components/Loading.jsx";
+import { Button } from "../components/ui/button.jsx";
+import { Card, FilterPills, PageHeader, SkeletonRows } from "../components/ui/primitives.jsx";
+import { Field, Slider } from "../components/ui/controls.jsx";
+import RulesCard from "../components/RulesCard.jsx";
 
-const INACTIVE_OPTIONS = [
-  { value: 90, label: "90 days" }, { value: 180, label: "180 days" },
-  { value: 365, label: "1 year" }, { value: 730, label: "2 years" },
-];
+const INACTIVE = [{ value: 90, label: "90 days" }, { value: 180, label: "180 days" }, { value: 365, label: "1 year" }, { value: 730, label: "2 years" }];
 
 export default function Settings() {
-  const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState(null);
+  const [saved, setSaved] = useState(null);
   const [savings, setSavings] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
   const toast = useToast();
-  const { user } = useUser();
 
   useEffect(() => {
-    Promise.all([api.getSettings(), api.getSavings()]).then(([s, sv]) => {
-      setSettings(s);
-      setSavings(sv);
-      setLoading(false);
-    });
-  }, []);
+    Promise.all([api.getSettings(), api.getSavings()]).then(
+      ([s, sv]) => {
+        setSettings(s);
+        setSaved(s);
+        setSavings(sv);
+      },
+      (e) => toast(e.message, "error"),
+    );
+  }, [toast]);
 
-  function set(field, value) {
-    setSettings((prev) => ({ ...prev, [field]: value }));
-  }
+  const set = (field, value) => setSettings((p) => ({ ...p, [field]: value }));
+  const dirty = settings && saved && JSON.stringify(settings) !== JSON.stringify(saved);
 
   async function save() {
-    setSaving(true);
+    setBusy(true);
     try {
-      const updated = await api.updateSettings(settings);
+      const { allow_format_conversion: _unused, ...body } = settings;
+      const updated = await api.updateSettings(body);
       setSettings(updated);
-      toast("Settings saved.");
+      setSaved(updated);
+      toast("Settings saved. They apply from the next scan.");
     } catch (e) {
       toast(e.message, "error");
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
-  if (loading) return <Loading label="Loading settings…" />;
+  if (!settings) return <Card bodyClassName="p-0"><SkeletonRows rows={6} /></Card>;
 
-  return (
-    <div className="space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
-        <p className="text-sm text-slate-500">Tune thresholds to match how you use your Drive — nothing here changes what's already on Drive.</p>
-      </div>
-
-      <Card title="Google Drive Connection">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-slate-600">Connected account</span>
-          <span className="font-medium text-slate-900">{user?.email}{user?.is_demo ? " (Demo Mode)" : ""}</span>
-        </div>
-      </Card>
-
-      <Card title="Large File Thresholds" subtitle="Files at or above these sizes are flagged for review.">
-        <div className="grid grid-cols-3 gap-4">
-          <Field label="Large (MB)"><input type="number" min="1" value={settings.large_file_mb} onChange={(e) => set("large_file_mb", +e.target.value)} className="input" /></Field>
-          <Field label="Very large (MB)"><input type="number" min="1" value={settings.very_large_file_mb} onChange={(e) => set("very_large_file_mb", +e.target.value)} className="input" /></Field>
-          <Field label="Huge (MB)"><input type="number" min="1" value={settings.huge_file_mb} onChange={(e) => set("huge_file_mb", +e.target.value)} className="input" /></Field>
-        </div>
-      </Card>
-
-      <Card title="Inactive File Threshold" subtitle={'Files older than this are surfaced as "potentially inactive" — never deleted automatically.'}>
-        <div className="flex gap-2 flex-wrap">
-          {INACTIVE_OPTIONS.map((o) => (
-            <button
-              key={o.value}
-              onClick={() => set("inactive_days", o.value)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium border ${settings.inactive_days === o.value ? "bg-brand-600 text-white border-brand-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </Card>
-
-      <Card title="Compression Preferences">
-        <Field label={`JPEG quality (${settings.jpeg_quality})`}>
-          <input type="range" min="30" max="95" value={settings.jpeg_quality} onChange={(e) => set("jpeg_quality", +e.target.value)} className="w-full" />
-        </Field>
-        <Field label="Minimum saving to recommend compression (%)">
-          <input type="number" min="1" max="90" value={settings.min_saving_percent} onChange={(e) => set("min_saving_percent", +e.target.value)} className="input" />
-        </Field>
-        <label className="flex items-center gap-2 text-sm text-slate-600 mt-2">
-          <input type="checkbox" checked={settings.allow_format_conversion} onChange={(e) => set("allow_format_conversion", e.target.checked)} />
-          Allow format conversion (e.g. PNG → WebP) when it saves meaningfully more space
-        </label>
-      </Card>
-
-      <Card title="Storage Pricing Configuration" subtitle="Illustrative only — see disclaimer below.">
-        {savings?.next_plan ? (
-          <div className="text-sm text-slate-600 space-y-1">
-            <p>Next plan: <strong>{savings.next_plan.name}</strong> — {savings.next_plan.storage_gb} GB for {savings.currency} {savings.next_plan.price_monthly}/mo</p>
-            <p>Effective equivalent cost: <strong>{savings.currency} {savings.effective_cost_per_gb} / GB</strong> beyond the free tier</p>
-            <p className="text-xs text-slate-400 mt-2">{savings.disclaimer}</p>
-          </div>
-        ) : <p className="text-sm text-slate-400">No paid plan configured.</p>}
-        <p className="text-xs text-slate-400 mt-3">Pricing comes from <code>data/storage_plans.json</code> on the server and can be updated without code changes.</p>
-      </Card>
-
-      <div className="flex justify-end">
-        <button onClick={save} disabled={saving} className="px-5 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-60">
-          {saving ? "Saving…" : "Save Settings"}
-        </button>
-      </div>
-    </div>
+  const num = (field, props = {}) => (
+    <input type="number" className="field mono" value={settings[field]} onChange={(e) => set(field, +e.target.value)} {...props} />
   );
-}
 
-function Field({ label, children }) {
   return (
-    <label className="block text-sm mb-3">
-      <span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>
-      {children}
-    </label>
+    <div className="space-y-4">
+      <PageHeader
+        title="Settings"
+        description="Thresholds used by the next scan. Nothing here changes files that are already on Drive."
+        actions={<Button variant="primary" disabled={!dirty || busy} onClick={save}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : "Save settings"}</Button>}
+      />
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card title="Large-file thresholds" subtitle="Files at or above these sizes are flagged for review (MB).">
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Large">{num("large_file_mb", { min: 1 })}</Field>
+            <Field label="Very large">{num("very_large_file_mb", { min: 1 })}</Field>
+            <Field label="Huge">{num("huge_file_mb", { min: 1 })}</Field>
+          </div>
+        </Card>
+
+        <Card title="Inactivity" subtitle={'Files not modified for this long count as "potentially inactive" — never deleted automatically.'}>
+          <FilterPills options={INACTIVE} value={settings.inactive_days} onChange={(v) => set("inactive_days", v)} />
+        </Card>
+
+        <Card title="Compression" subtitle="Applies to images and PDFs (videos use the server's H.264 settings).">
+          <Field label="JPEG quality" hint="Lower = smaller files, more visible artifacts. 70–80 is a good balance.">
+            <div className="flex items-center gap-3">
+              <Slider value={settings.jpeg_quality} onChange={(v) => set("jpeg_quality", v)} min={30} max={95} label="JPEG quality" />
+              <span className="mono w-8 text-right text-[13px] text-ink">{settings.jpeg_quality}</span>
+            </div>
+          </Field>
+          <Field label="Minimum saving to compress (%)" hint="If the measured saving is smaller, nothing is uploaded." className="mt-4">
+            {num("min_saving_percent", { min: 1, max: 90 })}
+          </Field>
+        </Card>
+
+        <Card title="Gmail" subtitle="Emails at or above this size are listed on the Gmail & Photos page.">
+          <Field label="Large email threshold (MB)">{num("gmail_min_mb", { min: 1, max: 100 })}</Field>
+        </Card>
+      </div>
+
+      <RulesCard />
+
+      {savings?.next_plan && (
+        <Card title="Storage pricing reference" subtitle="Illustrative — from backend/data/storage_plans.json.">
+          <p className="text-[13px] text-sub">
+            Next plan: <span className="text-ink">{savings.next_plan.name}</span> —{" "}
+            <span className="mono text-ink">{savings.next_plan.storage_gb} GB</span> for{" "}
+            <span className="mono text-ink">{savings.currency} {savings.next_plan.price_monthly}/mo</span> · effective{" "}
+            <span className="mono text-ink">{savings.currency} {savings.effective_cost_per_gb}/GB</span> beyond the free tier.
+          </p>
+          <p className="mt-2 text-[11px] text-faint">{savings.disclaimer}</p>
+        </Card>
+      )}
+    </div>
   );
 }

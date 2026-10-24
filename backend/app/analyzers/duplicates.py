@@ -1,11 +1,18 @@
 """Duplicate file detection.
 
-Three levels, cheapest first, per the product spec:
-  1. Exact/normalized filename match (same size)
-  2. Size + normalized filename (handles "report (1).pdf", "report_final.pdf")
-  3. Content hash (SHA-256) — used only for files a caller has already hashed
-     (hashing requires downloading content, so it's opt-in / done for a
-     bounded candidate set, never for the whole Drive on every analysis)
+Three levels, highest confidence first:
+  1. Content hash — Drive returns sha256Checksum/md5Checksum for every
+     binary file as plain metadata, so this costs no downloads. Two files
+     with the same hash are byte-for-byte identical.
+  2. Size + normalized name + extension — only for files Drive gave no hash
+     for (Workspace-native Docs/Sheets/Slides). If both files *have* hashes
+     and the hashes differ, the contents differ, so they are never grouped
+     here no matter how alike their names look.
+  3. Normalized name + extension, different content — these are *versions*
+     ("report.pdf" vs "report_final.pdf"), not copies. They're surfaced for
+     review only: never counted as recoverable space, and the API refuses
+     to bulk-trash them unless the user explicitly acknowledges that the
+     contents differ.
 
 Files are only ever *grouped* here — nothing is deleted. The engine also
 picks a *recommended* file to keep (most recently modified), but the caller
@@ -25,6 +32,20 @@ _COPY_PATTERNS = [
     re.compile(r"^copy of\s+", re.I),     # "Copy of name"
 ]
 
+# Names so generic that two files sharing one says nothing about their content.
+_GENERIC_NAMES = {
+    "untitled", "untitled document", "untitled spreadsheet", "untitled presentation",
+    "untitled form", "untitled drawing", "image", "img", "photo", "picture", "scan",
+    "document", "doc", "file", "new", "new document", "download", "screenshot",
+    "video", "audio", "recording", "notes", "test",
+}
+
+# Drive containers: a "duplicate" folder or shortcut must never be trashed —
+# trashing a folder trashes everything inside it.
+_EXCLUDED_MIME_TYPES = {"application/vnd.google-apps.folder", "application/vnd.google-apps.shortcut"}
+
+REVIEW_ONLY_LEVELS = {"name"}
+
 
 def normalize_name(name: str) -> str:
     base = name.rsplit(".", 1)[0] if "." in name else name
@@ -35,21 +56,32 @@ def normalize_name(name: str) -> str:
     return base
 
 
+def _ext(name: str) -> str:
+    return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+
 @dataclass
 class DupGroup:
     drive_ids: list[str]
     level: str  # "hash" | "size_name" | "name"
     recommended_keep_drive_id: str
 
+    @property
+    def review_only(self) -> bool:
+        """True when members are different content (versions), not copies."""
+        return self.level in REVIEW_ONLY_LEVELS
+
 
 def find_duplicate_groups(files: list[dict]) -> list[DupGroup]:
-    """`files` items need: drive_id, name, size_bytes, modified_time, content_hash(optional)."""
+    """`files` items need: drive_id, name, size_bytes, modified_time,
+    content_hash (optional), mime_type (optional)."""
     groups: list[DupGroup] = []
+    candidates = [f for f in files if f.get("mime_type") not in _EXCLUDED_MIME_TYPES]
     consumed: set[str] = set()
 
-    # Level 3: content hash (highest confidence)
+    # Level 1: content hash (exact copies)
     by_hash: dict[str, list[dict]] = defaultdict(list)
-    for f in files:
+    for f in candidates:
         if f.get("content_hash"):
             by_hash[f["content_hash"]].append(f)
     for members in by_hash.values():
@@ -57,11 +89,12 @@ def find_duplicate_groups(files: list[dict]) -> list[DupGroup]:
             groups.append(_build_group(members, "hash"))
             consumed.update(f["drive_id"] for f in members)
 
-    # Level 2: size + normalized name
-    remaining = [f for f in files if f["drive_id"] not in consumed]
-    by_size_name: dict[tuple[int, str], list[dict]] = defaultdict(list)
-    for f in remaining:
-        key = (f["size_bytes"], normalize_name(f["name"]))
+    # Level 2: size + normalized name, only where no hash is available
+    by_size_name: dict[tuple[int, str, str], list[dict]] = defaultdict(list)
+    for f in candidates:
+        if f["drive_id"] in consumed or f.get("content_hash"):
+            continue
+        key = (f["size_bytes"], normalize_name(f["name"]), _ext(f["name"]))
         if f["size_bytes"] > 0 and key[1]:
             by_size_name[key].append(f)
     for members in by_size_name.values():
@@ -69,12 +102,13 @@ def find_duplicate_groups(files: list[dict]) -> list[DupGroup]:
             groups.append(_build_group(members, "size_name"))
             consumed.update(f["drive_id"] for f in members)
 
-    # Level 1: normalized name only, sizes differ (weaker signal — still surfaced for review)
-    remaining = [f for f in files if f["drive_id"] not in consumed]
-    by_name: dict[str, list[dict]] = defaultdict(list)
-    for f in remaining:
-        key = normalize_name(f["name"])
-        if key:
+    # Level 3: same normalized name + extension, different content (versions — review only)
+    by_name: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for f in candidates:
+        if f["drive_id"] in consumed:
+            continue
+        key = (normalize_name(f["name"]), _ext(f["name"]))
+        if key[0] and key[0] not in _GENERIC_NAMES:
             by_name[key].append(f)
     for members in by_name.values():
         if len(members) > 1:

@@ -1,0 +1,41 @@
+{
+  "region": "us-east-1",
+  "currency": "USD",
+  "disclaimer": "Illustrative S3 list prices for us-east-1 (first 50 TB/month tier), used only to estimate savings. Prices differ by region and change over time - check https://aws.amazon.com/s3/pricing/ and edit backend/data/s3_pricing.json to match your region.",
+  "storage_per_gb_month": {
+    "STANDARD": 0.023,
+    "REDUCED_REDUNDANCY": 0.024,
+    "INTELLIGENT_TIERING": 0.023,
+    "STANDARD_IA": 0.0125,
+    "ONEZONE_IA": 0.01,
+    "GLACIER_IR": 0.004,
+    "GLACIER": 0.0036,
+    "DEEP_ARCHIVE": 0.00099
+  },
+  "transition_per_1000_requests": {
+    "STANDARD_IA": 0.01,
+    "ONEZONE_IA": 0.01,
+    "INTELLIGENT_TIERING": 0.01,
+    "GLACIER_IR": 0.02,
+    "GLACIER": 0.03,
+    "DEEP_ARCHIVE": 0.05
+  },
+  "retrieval_per_gb": {
+    "STANDARD_IA": 0.01,
+    "ONEZONE_IA": 0.01,
+    "GLACIER_IR": 0.03,
+    "GLACIER": 0.01,
+    "DEEP_ARCHIVE": 0.02
+  },
+  "min_storage_days": {
+    "STANDARD_IA": 30,
+    "ONEZONE_IA": 30,
+    "GLACIER_IR": 90,
+    "GLACIER": 90,
+    "DEEP_ARCHIVE": 180
+  },
+  "min_billable_object_kb": 128,
+  "glacier_overhead_kb_per_object": 40,
+  "intelligent_tiering_monitoring_per_1000_objects": 0.0025,
+  "list_per_1000_requests": 0.005
+}

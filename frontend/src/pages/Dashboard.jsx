@@ -1,144 +1,226 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { Archive, ChevronRight, Copy, Film, Mail, RefreshCw, ScanSearch, Search } from "lucide-react";
 import { api } from "../services/api.js";
-import { useToast } from "../hooks/useToast.jsx";
-import Card from "../components/Card.jsx";
-import StorageOverviewCard from "../components/StorageOverviewCard.jsx";
-import OptimizationScoreCard from "../components/OptimizationScoreCard.jsx";
-import RecommendationList from "../components/RecommendationList.jsx";
-import { Loading, EmptyState } from "../components/Loading.jsx";
+import { useScan } from "../context/scan.jsx";
+import { useDrawer } from "../context/drawer.jsx";
+import { Button } from "../components/ui/button.jsx";
+import { Badge, Card, EmptyState, Legend, PageHeader, SegmentedBar, SkeletonRows, Stat } from "../components/ui/primitives.jsx";
+import { JobStatus } from "../components/ui/progress.jsx";
+import { DriveTrashNotice } from "../components/GoogleLinks.jsx";
+import { driveLinkActions } from "../components/details.js";
+import { useGoogleLinks } from "../hooks/useGoogleLinks.js";
 import { formatBytes, formatDate } from "../utils/format.js";
 
-const QUICK_ACTIONS = [
-  { to: "/duplicates", icon: "🧬", label: "Find Duplicates" },
-  { to: "/compression", icon: "🗜️", label: "Compress Large Files" },
-  { to: "/files?filter=inactive", icon: "🕘", label: "Review Inactive Files" },
-  { to: "/files?filter=archive_candidate", icon: "🗄️", label: "Archive Old Files" },
+export const REC_TYPE = {
+  compress: { label: "Compress", icon: Film, to: "/compression" },
+  duplicate: { label: "Remove duplicates", icon: Copy, to: "/duplicates" },
+  archive: { label: "Archive inactive files", icon: Archive, to: "/files?filter=archive_candidate" },
+  review: { label: "Review large file", icon: Search, to: "/files?filter=large" },
+  gmail: { label: "Review large emails", icon: Mail, to: "/gmail" },
+};
+const RISK_TONE = { low: "ok", medium: "warn", high: "bad" };
+const DEDUCTIONS = [
+  ["duplicate_inefficiency", "Duplicate copies"],
+  ["compression_opportunity", "Compressible files"],
+  ["inactive_data", "Inactive data"],
+  ["large_file_concentration", "Large-file concentration"],
 ];
 
-export default function Dashboard() {
-  const [loading, setLoading] = useState(true);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [storage, setStorage] = useState(null);
-  const [analysis, setAnalysis] = useState(null);
-  const [recs, setRecs] = useState([]);
-  const [history, setHistory] = useState([]);
-  const toast = useToast();
+function excerpt(reason) {
+  return reason.replace(/^Compression recommended because:\s*/i, "").replace(/\n-?\s*/g, " · ").trim();
+}
 
-  const loadAll = useCallback(async () => {
-    const [s, a, r, h] = await Promise.all([
+export default function Dashboard() {
+  const { version, scanning, job, runDrive } = useScan();
+  const { open } = useDrawer();
+  const navigate = useNavigate();
+  const links = useGoogleLinks();
+  const [data, setData] = useState(null);
+
+  const load = useCallback(async () => {
+    const [storage, analysis, recs, history] = await Promise.all([
       api.getStorage(), api.getAnalysis(), api.getRecommendations(), api.getHistory(),
     ]);
-    setStorage(s);
-    setAnalysis(a);
-    setRecs(r);
-    setHistory(h.slice(0, 5));
+    setData({ storage, analysis, recs, history: history.slice(0, 6) });
   }, []);
 
   useEffect(() => {
-    loadAll().finally(() => setLoading(false));
-  }, [loadAll]);
+    load().catch(() => setData({ error: true }));
+  }, [load, version]);
 
-  async function runAnalysis() {
-    setAnalyzing(true);
-    try {
-      await api.analyze();
-      await loadAll();
-      toast("Analysis complete.");
-    } catch (e) {
-      toast(e.message, "error");
-    } finally {
-      setAnalyzing(false);
-    }
+  if (!data) return <Card bodyClassName="p-0"><SkeletonRows rows={8} /></Card>;
+  const { storage, analysis, recs, history } = data;
+
+  if (!analysis?.analyzed) {
+    return (
+      <div className="space-y-5">
+        <PageHeader title="Dashboard" description="Drive, Gmail and Photos share one storage quota. Run a scan to see where yours goes." />
+        <Card>
+          {scanning ? (
+            <JobStatus job={job} />
+          ) : (
+            <EmptyState
+              icon={ScanSearch}
+              title="No analysis yet"
+              subtitle="A scan reads file metadata only (names, sizes, dates, checksums) — never file contents — and builds the recommendations."
+              action={<Button variant="primary" onClick={runDrive}><RefreshCw className="h-3.5 w-3.5" /> Run Scan</Button>}
+            />
+          )}
+        </Card>
+      </div>
+    );
   }
 
-  if (loading) return <Loading label="Loading dashboard…" />;
+  const segments = [
+    { key: "drive", label: "Google Drive", value: storage.drive_bytes, color: "rgb(var(--tier-drive))" },
+    { key: "trash", label: "Drive Trash", value: storage.drive_trash_bytes, color: "rgb(var(--tier-trash))" },
+    { key: "gmail", label: "Gmail + Photos", value: storage.gmail_photos_bytes, color: "rgb(var(--tier-gmail))" },
+  ];
+  const score = Math.round(analysis.optimization_score);
+
+  function openRec(rec, rank) {
+    const meta = REC_TYPE[rec.type] || REC_TYPE.review;
+    open({
+      kind: `Recommendation #${rank}`,
+      title: rec.file_name ? `${meta.label}: ${rec.file_name}` : meta.label,
+      badges: [{ label: `${rec.risk} risk`, tone: RISK_TONE[rec.risk] }, { label: `${Math.round(rec.confidence * 100)}% confidence`, tone: "neutral" }],
+      fields: [
+        { label: "Est. saving", value: rec.estimated_saving_bytes ? formatBytes(rec.estimated_saving_bytes) : "Review only — not counted", mono: true },
+        { label: "Action", value: rec.action },
+      ],
+      reason: rec.reason,
+      actions: [
+        { label: `Open ${meta.label.toLowerCase()}`, variant: "primary", icon: ChevronRight, onClick: () => navigate(meta.to) },
+        ...(rec.file_drive_id
+          ? driveLinkActions({ drive_id: rec.file_drive_id, web_url: rec.file_web_url, parent_id: rec.file_parent_id }, links)
+          : []),
+      ],
+    });
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-sm text-slate-500">Intelligent Google Drive Storage Optimization</p>
-        </div>
-        <button
-          onClick={runAnalysis}
-          disabled={analyzing}
-          className="px-4 py-2.5 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 disabled:opacity-60"
-        >
-          {analyzing ? "Analyzing Drive…" : analysis?.analyzed ? "Re-analyze" : "Analyze Drive"}
-        </button>
+    <div className="space-y-5">
+      <PageHeader title="Dashboard" description={`Last scan ${formatDate(analysis.completed_at)} · ${analysis.files_analyzed} files analyzed`} />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Used" value={formatBytes(storage.used_bytes)} sub={`of ${formatBytes(storage.quota_bytes)} · ${storage.used_percent}%`} tone={storage.used_percent >= 90 ? "bad" : undefined} />
+        <Stat label="Potentially recoverable" value={`+${formatBytes(storage.recoverable_bytes)}`} sub="counted once per file" tone="ok" />
+        <Stat label="After optimization" value={formatBytes(storage.projected_used_bytes)} sub={`${storage.projected_used_percent}% · once Trash is emptied`} />
+        <Stat label="Recommendations" value={recs.length} sub={`${analysis.duplicates_found} duplicate files found`} />
       </div>
 
-      {!analysis?.analyzed ? (
-        <Card>
-          <EmptyState
-            title="No analysis yet"
-            subtitle="Click Analyze Drive to scan your Drive's metadata and generate recommendations."
-          />
-        </Card>
-      ) : (
-        <>
-          <div className="grid lg:grid-cols-2 gap-5">
-            <StorageOverviewCard storage={storage} />
-            <OptimizationScoreCard score={analysis.optimization_score} summary={scoreSummary(analysis.optimization_score)} breakdown={analysis.score_breakdown} />
+      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <Card title="Shared storage quota" subtitle="Google reports Drive and its Trash separately; Gmail and Photos only as one number.">
+          <SegmentedBar segments={segments} total={storage.quota_bytes} marker={storage.projected_used_bytes} height="h-3" />
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <Legend items={segments} />
+            <span className="text-[12px] text-sub">
+              Free{" "}<span className="mono text-ink">{formatBytes(storage.remaining_bytes)}</span>
+            </span>
           </div>
+          {storage.drive_trash_bytes > 0 && (
+            <DriveTrashNotice className="mt-3">
+              <span className="mono">{formatBytes(storage.drive_trash_bytes)}</span> is in Drive&apos;s Trash and still counts until it&apos;s emptied —
+              Google does that automatically after 30 days.
+            </DriveTrashNotice>
+          )}
+        </Card>
 
-          <Card title="Quick Actions">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {QUICK_ACTIONS.map((a) => (
-                <Link key={a.to} to={a.to} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-100 hover:border-brand-200 hover:bg-brand-50 transition-colors">
-                  <span className="text-2xl">{a.icon}</span>
-                  <span className="text-xs font-medium text-slate-700 text-center">{a.label}</span>
-                </Link>
+        <Card title="Optimization score" subtitle="100 minus four capped, weighted deductions.">
+          <div className="flex items-center gap-4">
+            <ScoreGauge score={score} />
+            <ul className="min-w-0 flex-1 space-y-1.5">
+              {DEDUCTIONS.map(([key, label]) => (
+                <li key={key} className="flex items-baseline justify-between gap-2 text-[12px]">
+                  <span className="truncate text-sub">{label}</span>
+                  <span className="mono text-bad-ink">−{analysis.score_breakdown?.[key] ?? 0}</span>
+                </li>
               ))}
-            </div>
-          </Card>
+            </ul>
+          </div>
+        </Card>
+      </div>
 
-          <Card title="Top Recommendations" subtitle={`${recs.length} pending recommendation${recs.length === 1 ? "" : "s"}`}>
-            <RecommendationList recommendations={recs} limit={5} />
-          </Card>
+      <Card title="Recommendations" subtitle="Ranked by estimated saving. Select one for the full reasoning." bodyClassName="p-0">
+        {recs.length === 0 ? (
+          <EmptyState title="Nothing to optimize" subtitle="Your Drive is in good shape. Scan again after adding files." />
+        ) : (
+          <ol className="divide-y divide-line">
+            {recs.slice(0, 12).map((rec, i) => {
+              const meta = REC_TYPE[rec.type] || REC_TYPE.review;
+              return (
+                <li key={rec.id}>
+                  <button onClick={() => openRec(rec, i + 1)} className="tactile flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-canvas">
+                    <span className="mono w-6 shrink-0 text-[12px] text-faint">{String(i + 1).padStart(2, "0")}</span>
+                    <meta.icon className="h-4 w-4 shrink-0 text-sub" strokeWidth={1.75} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[13px] font-medium text-ink">{meta.label}</span>
+                        {rec.file_name && <span className="truncate text-[13px] text-sub">{rec.file_name}</span>}
+                      </div>
+                      <div className="truncate text-[12px] text-faint">{excerpt(rec.reason)}</div>
+                    </div>
+                    <Badge tone={RISK_TONE[rec.risk]} className="hidden sm:inline-flex">{rec.risk}</Badge>
+                    <span className="mono w-20 shrink-0 text-right text-[13px] text-ok-ink">
+                      {rec.estimated_saving_bytes ? formatBytes(rec.estimated_saving_bytes) : <span className="text-faint">review</span>}
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-faint" />
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </Card>
 
-          <Card title="Recent Optimizations">
-            {history.length === 0 ? (
-              <p className="text-sm text-slate-400 py-4 text-center">No actions taken yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-slate-400 uppercase tracking-wide">
-                      <th className="py-2 pr-4">File</th>
-                      <th className="py-2 pr-4">Action</th>
-                      <th className="py-2 pr-4">Before</th>
-                      <th className="py-2 pr-4">After</th>
-                      <th className="py-2 pr-4">Saved</th>
-                      <th className="py-2">When</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {history.map((h) => (
-                      <tr key={h.id} className="border-t border-slate-100">
-                        <td className="py-2 pr-4 font-medium text-slate-800 max-w-[200px] truncate">{h.file_name}</td>
-                        <td className="py-2 pr-4 capitalize text-slate-600">{h.action}</td>
-                        <td className="py-2 pr-4 text-slate-500">{formatBytes(h.original_size_bytes)}</td>
-                        <td className="py-2 pr-4 text-slate-500">{formatBytes(h.new_size_bytes)}</td>
-                        <td className="py-2 pr-4 font-medium text-emerald-700">{formatBytes(h.saved_bytes)}</td>
-                        <td className="py-2 text-slate-400">{formatDate(h.created_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-        </>
-      )}
+      <Card title="Recent actions" action={<Link to="/history" className="text-[12px] font-medium text-accent-ink hover:underline">History & Restore →</Link>} bodyClassName="p-0">
+        {history.length === 0 ? (
+          <p className="px-4 py-6 text-center text-[13px] text-faint">No actions yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead className="border-b border-line">
+                <tr>
+                  <th className="th">File</th><th className="th">Action</th><th className="th text-right">Before</th>
+                  <th className="th text-right">After</th><th className="th text-right">Saved</th><th className="th">When</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {history.map((h) => (
+                  <tr key={h.id}>
+                    <td className="td max-w-[260px] truncate font-medium">{h.file_name}</td>
+                    <td className="td text-sub">{h.action.replace(/_/g, " ")}</td>
+                    <td className="td mono text-right text-sub">{formatBytes(h.original_size_bytes)}</td>
+                    <td className="td mono text-right text-sub">{formatBytes(h.new_size_bytes)}</td>
+                    <td className="td mono text-right text-ok-ink">{formatBytes(h.saved_bytes)}</td>
+                    <td className="td text-faint">{formatDate(h.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
 
-function scoreSummary(score) {
-  if (score >= 85) return "Your Drive is well optimized.";
-  if (score >= 60) return "Your Drive has some optimization opportunities.";
-  return "Your Drive has significant optimization opportunities.";
+/** Semicircular gauge drawn as an SVG arc. */
+function ScoreGauge({ score }) {
+  const r = 44;
+  const half = Math.PI * r;
+  const tone = score >= 85 ? "stroke-ok" : score >= 60 ? "stroke-warn" : "stroke-bad";
+  return (
+    <div className="relative h-[64px] w-[112px] shrink-0">
+      <svg viewBox="0 0 112 64" className="h-full w-full" aria-label={`Optimization score ${score} of 100`}>
+        <path d="M 12 56 A 44 44 0 0 1 100 56" fill="none" className="stroke-track" strokeWidth="8" />
+        <path d="M 12 56 A 44 44 0 0 1 100 56" fill="none" className={tone} strokeWidth="8" strokeDasharray={`${(score / 100) * half} ${half}`} />
+      </svg>
+      <div className="absolute inset-x-0 bottom-0 text-center">
+        <span className="mono text-[22px] font-medium leading-none text-ink">{score}</span>
+        <span className="mono text-[11px] text-faint">/100</span>
+      </div>
+    </div>
+  );
 }

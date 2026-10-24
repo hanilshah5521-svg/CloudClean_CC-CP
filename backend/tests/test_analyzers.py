@@ -89,3 +89,15 @@ def test_classify_uses_mime_first():
     assert classify("image/jpeg", ".txt") == "images"  # mime wins even with a misleading extension
     assert classify("application/pdf", "") == "pdf"
     assert extension_of("archive.tar.gz") == ".gz"
+
+
+def test_png_and_pdf_estimates_stay_realistic():
+    mb = 1024 * 1024
+    # Measured: real PNGs save ~6% losslessly, so under the default 10%
+    # minimum they aren't suggested at all.
+    assert estimate("images", ".png", 5 * mb).estimated_ratio < 0.10
+    # A big PDF is usually big because of images, which aren't re-encoded:
+    # size must not inflate the estimate.
+    small, big = estimate("pdf", ".pdf", 1 * mb), estimate("pdf", ".pdf", 80 * mb)
+    assert big.estimated_ratio == small.estimated_ratio <= 0.10
+    assert big.confidence < 0.5
