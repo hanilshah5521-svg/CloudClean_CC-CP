@@ -23,17 +23,18 @@ export function useGoogleLinks() {
   const real = !!user && !user.is_demo;
 
   return useMemo(() => {
-    const drive = (path) => (real ? withAccount(`https://drive.google.com/${path}`, email) : null);
+    // `account` (optional): the linked account that owns the file, when it isn't the one being worked in.
+    const drive = (path, account) => (real ? withAccount(`https://drive.google.com/${path}`, account || email) : null);
     return {
       demo: !real,
       /** The file itself (its Drive preview, or the Docs/Sheets editor). */
-      file: (f) =>
+      file: (f, account) =>
         real && f?.drive_id && !isDemoId(f.drive_id)
-          ? withAccount(f.web_url || `https://drive.google.com/file/d/${f.drive_id}/view`, email)
+          ? withAccount(f.web_url || `https://drive.google.com/file/d/${f.drive_id}/view`, account || email)
           : null,
       fileById: (driveId) => (driveId && !isDemoId(driveId) ? drive(`file/d/${driveId}/view`) : null),
       /** The folder a file sits in ("Show in folder"). */
-      folder: (folderId) => (folderId && !isDemoId(folderId) ? drive(`drive/folders/${folderId}`) : null),
+      folder: (folderId, account) => (folderId && !isDemoId(folderId) ? drive(`drive/folders/${folderId}`, account) : null),
       driveTrash: drive("drive/trash"),
       gmailMessage: (url) => (real && url ? withAccount(url, email) : null),
       gmailMessageById: (id) => (real && id ? withAccount(`https://mail.google.com/mail/#all/${id}`, email) : null),

@@ -10,12 +10,10 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.integrations.google_drive import build_auth_url, exchange_code, fetch_userinfo
-from app.models import (
-    AnalysisRun, CompressionRule, DriveFile, DuplicateGroup, GmailMessage, Job, OptimizationAction,
-    Recommendation, RuleSuggestion, StorageSnapshot, User, UserSettings,
-)
+from app.models import User, UserSettings
 from app.schemas import UserOut
 from app.security.session import get_current_user
+from app.services.account_service import delete_accounts, link as link_accounts
 
 router = APIRouter(tags=["auth"])
 
@@ -27,8 +25,8 @@ def _require_oauth():
         raise HTTPException(status_code=400, detail="Google OAuth is not configured on this server. Use Demo Mode, or set GOOGLE_CLIENT_ID/SECRET in .env.")
 
 
-def _start_oauth(request: Request) -> str:
-    url, state, code_verifier = build_auth_url()
+def _start_oauth(request: Request, choose_account: bool = False) -> str:
+    url, state, code_verifier = build_auth_url(choose_account)
     # Both live in the signed session cookie: state is checked on callback
     # (stops a forged callback logging the victim into someone else's
     # account), and the PKCE verifier proves the code is redeemed by us.
@@ -53,6 +51,19 @@ def google_login(request: Request):
     return RedirectResponse(_start_oauth(request))
 
 
+@router.get("/auth/google/link")
+def google_link(request: Request, user: User = Depends(get_current_user)):
+    """"Add Google account": sign in to another Google account and link it to
+    this profile. The account being worked in stays the same."""
+    if user.is_demo:
+        return RedirectResponse(f"{settings.frontend_url}/accounts?error=demo_link")
+    if not settings.google_oauth_configured:
+        return RedirectResponse(f"{settings.frontend_url}/accounts?error=not_configured")
+    url = _start_oauth(request, choose_account=True)
+    request.session["link_to_user_id"] = user.id
+    return RedirectResponse(url)
+
+
 @router.get("/auth/google/url")
 def google_auth_url(request: Request):
     _require_oauth()
@@ -68,7 +79,11 @@ def google_callback(request: Request, code: str | None = None, state: str | None
                     error: str | None = None, db: Session = Depends(get_db)):
     expected_state = request.session.pop("oauth_state", None)
     code_verifier = request.session.pop("oauth_code_verifier", None)
+    link_to = request.session.pop("link_to_user_id", None)
+    linking_user = db.query(User).filter(User.id == link_to, User.is_demo.is_(False)).first() if link_to else None
     if error:
+        if linking_user:  # cancelled while adding an account: stay signed in
+            return RedirectResponse(f"{settings.frontend_url}/accounts?error={quote(error)}")
         return _to_connect(error)
     if not expected_state or not state or not secrets.compare_digest(state, expected_state):
         return _to_connect("state_mismatch")
@@ -97,6 +112,10 @@ def google_callback(request: Request, code: str | None = None, state: str | None
     db.commit()
 
     request.session.clear()  # new session on login (no fixation)
+    if linking_user:
+        link_accounts(db, linking_user, user)
+        request.session["user_id"] = linking_user.id  # keep working in the same account
+        return RedirectResponse(f"{settings.frontend_url}/accounts?linked={quote(user.email)}")
     request.session["user_id"] = user.id
     return RedirectResponse(f"{settings.frontend_url}/dashboard")
 
@@ -121,11 +140,7 @@ def _purge_stale_demo_users(db: Session):
     stale = [uid for (uid,) in db.query(User.id).filter(User.is_demo.is_(True), User.created_at < cutoff)]
     if not stale:
         return
-    for model in (RuleSuggestion, CompressionRule, Job, Recommendation, DriveFile, DuplicateGroup, GmailMessage,
-                  OptimizationAction, AnalysisRun, StorageSnapshot, UserSettings):
-        db.query(model).filter(model.user_id.in_(stale)).delete(synchronize_session=False)
-    db.query(User).filter(User.id.in_(stale)).delete(synchronize_session=False)
-    db.commit()
+    delete_accounts(db, stale)
 
 
 @router.post("/auth/logout")

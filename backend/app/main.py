@@ -12,6 +12,7 @@ from app.api.routes import (
     analysis, analytics, archive, auth, compression, duplicates, files, gmail,
     history, jobs, recommendations, rules, settings as settings_routes, storage,
 )
+from app.api.routes import accounts as accounts_routes
 from app.api.routes import organize as organize_routes
 from app.api.routes import s3 as s3_routes
 from app.core.config import settings
@@ -81,3 +82,4 @@ for router in (auth.router, storage.router, files.router, analysis.router, analy
     app.include_router(router)
 app.include_router(s3_routes.router)  # AWS S3 provider
 app.include_router(organize_routes.router)  # folder grouping by naming convention
+app.include_router(accounts_routes.router)  # linked Google accounts

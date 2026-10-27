@@ -19,10 +19,14 @@ def job_out(db: Session, job: Job, user: User) -> dict:
 
 @router.get("/jobs/{job_id}")
 def get_job(job_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    job = db.query(Job).filter(Job.id == job_id, Job.user_id == user.id).first()
+    # Jobs of any linked account (a "scan all accounts" polls each of them).
+    from app.services.account_service import linked_users
+
+    owners = {u.id: u for u in linked_users(db, user)}
+    job = db.query(Job).filter(Job.id == job_id, Job.user_id.in_(list(owners))).first()
     if not job:  # someone else's job looks exactly like a missing one
         raise HTTPException(status_code=404, detail="Job not found.")
-    return job_out(db, job, user)
+    return job_out(db, job, owners[job.user_id])
 
 
 @router.get("/jobs")

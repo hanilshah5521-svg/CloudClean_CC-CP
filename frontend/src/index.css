@@ -40,15 +40,6 @@
     --tier-trash: 199 119 0;
     --tier-gmail: 139 92 246;
     --tier-s3: 15 138 95;
-    /* S3 storage classes: stronger = pricier / more frequently accessed. */
-    --cls-standard: 11 94 65;
-    --cls-rrs: 95 91 83;
-    --cls-intelligent: 15 138 95;
-    --cls-ia: 63 165 127;
-    --cls-onezone: 109 187 156;
-    --cls-glacier-ir: 150 207 184;
-    --cls-glacier: 188 226 210;
-    --cls-deep: 215 238 227;
   }
   .dark {
     color-scheme: dark;
@@ -83,14 +74,6 @@
     --tier-trash: 208 130 12;
     --tier-gmail: 155 120 248;
     --tier-s3: 19 151 106;
-    --cls-standard: 70 196 147;
-    --cls-rrs: 138 133 123;
-    --cls-intelligent: 47 164 122;
-    --cls-ia: 35 133 95;
-    --cls-onezone: 29 107 77;
-    --cls-glacier-ir: 25 86 63;
-    --cls-glacier: 22 69 51;
-    --cls-deep: 19 56 41;
   }
 
   html,

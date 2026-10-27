@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { DrawerProvider } from "../../context/drawer.jsx";
 import { ScanProvider } from "../../context/scan.jsx";
+import { AccountsProvider } from "../../context/accounts.jsx";
 import { useUser } from "../../hooks/useUser.jsx";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
@@ -16,6 +17,7 @@ export default function AppShell() {
 
   return (
     <ScanProvider>
+      <AccountsProvider>
       <DrawerProvider>
         <div className="flex h-screen overflow-hidden">
           <aside className="hidden w-60 shrink-0 border-r border-line lg:block">
@@ -48,7 +50,7 @@ export default function AppShell() {
           <div className="flex min-w-0 flex-1 flex-col">
             {user?.is_demo && (
               <div className="shrink-0 border-b border-warn/30 bg-warn-soft px-4 py-1 text-center text-[12px] font-medium text-warn-ink">
-                Demo Mode — simulated Drive, Gmail and S3 data. Nothing real is touched.
+                Demo Mode — simulated Google Drive data. Nothing real is touched.
               </div>
             )}
             <TopBar onMenu={() => setNavOpen(true)} />
@@ -64,6 +66,7 @@ export default function AppShell() {
           <DetailsDrawer />
         </div>
       </DrawerProvider>
+      </AccountsProvider>
     </ScanProvider>
   );
 }

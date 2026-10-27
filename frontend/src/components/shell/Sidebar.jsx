@@ -1,19 +1,15 @@
 import { useEffect, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
-import { HardDrive, LogOut } from "lucide-react";
+import { NavLink } from "react-router-dom";
+import { HardDrive } from "lucide-react";
 import { api } from "../../services/api.js";
-import { useUser } from "../../hooks/useUser.jsx";
 import { useScan } from "../../context/scan.jsx";
 import { cn } from "../../lib/cn.js";
 import { formatBytes } from "../../utils/format.js";
-import ThemeToggle from "../ThemeToggle.jsx";
 import { NAV } from "./nav.js";
 
 export default function Sidebar({ onNavigate }) {
-  const { user, logout } = useUser();
   const { version } = useScan();
   const [storage, setStorage] = useState(null);
-  const navigate = useNavigate();
 
   useEffect(() => {
     api.getStorage().then(setStorage, () => setStorage(null));
@@ -29,14 +25,6 @@ export default function Sidebar({ onNavigate }) {
             <HardDrive className="h-4 w-4" strokeWidth={2} />
           </div>
           <span className="text-[15px] font-semibold text-ink">CloudClean</span>
-        </div>
-        <div className="mt-3 flex items-center gap-2 rounded border border-line bg-surface px-2 py-1.5">
-          <span className="relative flex h-2 w-2 shrink-0">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-50" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-ok" />
-          </span>
-          <span className="mono min-w-0 truncate text-[11px] text-ink" title={user?.email}>{user?.email}</span>
-          {user?.is_demo && <span className="ml-auto shrink-0 rounded-sm bg-warn-soft px-1 text-[10px] font-semibold text-warn-ink">DEMO</span>}
         </div>
       </div>
 
@@ -72,18 +60,6 @@ export default function Sidebar({ onNavigate }) {
         </div>
         <div className="mono mt-1 text-[11px] text-sub">
           {storage ? `${formatBytes(storage.used_bytes)} / ${formatBytes(storage.quota_bytes)}` : "Not analyzed yet"}
-        </div>
-        <div className="mt-3 flex items-center justify-between gap-2">
-          <button
-            onClick={async () => {
-              await logout();
-              navigate("/connect");
-            }}
-            className="tactile flex items-center gap-1.5 text-[12px] text-sub hover:text-bad-ink"
-          >
-            <LogOut className="h-3.5 w-3.5" /> Sign out
-          </button>
-          <ThemeToggle />
         </div>
       </div>
     </div>

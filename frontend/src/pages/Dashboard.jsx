@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Archive, ChevronRight, Copy, Film, Mail, RefreshCw, ScanSearch, Search } from "lucide-react";
+import { Archive, ChevronRight, Copy, Film, RefreshCw, ScanSearch, Search } from "lucide-react";
 import { api } from "../services/api.js";
 import { useScan } from "../context/scan.jsx";
+import { useAccounts } from "../context/accounts.jsx";
 import { useDrawer } from "../context/drawer.jsx";
 import { Button } from "../components/ui/button.jsx";
 import { Badge, Card, EmptyState, Legend, PageHeader, SegmentedBar, SkeletonRows, Stat } from "../components/ui/primitives.jsx";
 import { JobStatus } from "../components/ui/progress.jsx";
+import { ConfirmDialog } from "../components/ui/dialog.jsx";
+import { useToast } from "../hooks/useToast.jsx";
 import { DriveTrashNotice } from "../components/GoogleLinks.jsx";
 import { driveLinkActions } from "../components/details.js";
 import { useGoogleLinks } from "../hooks/useGoogleLinks.js";
@@ -15,9 +18,8 @@ import { formatBytes, formatDate } from "../utils/format.js";
 export const REC_TYPE = {
   compress: { label: "Compress", icon: Film, to: "/compression" },
   duplicate: { label: "Remove duplicates", icon: Copy, to: "/duplicates" },
-  archive: { label: "Archive inactive files", icon: Archive, to: "/files?filter=archive_candidate" },
-  review: { label: "Review large file", icon: Search, to: "/files?filter=large" },
-  gmail: { label: "Review large emails", icon: Mail, to: "/gmail" },
+  archive: { label: "Archive inactive files", icon: Archive },
+  review: { label: "Review large file", icon: Search },
 };
 const RISK_TONE = { low: "ok", medium: "warn", high: "bad" };
 const DEDUCTIONS = [
@@ -33,16 +35,21 @@ function excerpt(reason) {
 
 export default function Dashboard() {
   const { version, scanning, job, runDrive } = useScan();
-  const { open } = useDrawer();
+  const { open, close } = useDrawer();
   const navigate = useNavigate();
   const links = useGoogleLinks();
+  const toast = useToast();
+  const { multiple, accounts, active, summary } = useAccounts();
   const [data, setData] = useState(null);
+  const [archiving, setArchiving] = useState(null); // files awaiting the archive confirmation
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const [storage, analysis, recs, history] = await Promise.all([
       api.getStorage(), api.getAnalysis(), api.getRecommendations(), api.getHistory(),
     ]);
-    setData({ storage, analysis, recs, history: history.slice(0, 6) });
+    // Gmail recommendations from earlier scans are hidden: CloudClean now works on Drive only.
+    setData({ storage, analysis, recs: recs.filter((r) => r.type !== "gmail"), history: history.slice(0, 6) });
   }, []);
 
   useEffect(() => {
@@ -79,7 +86,59 @@ export default function Dashboard() {
   ];
   const score = Math.round(analysis.optimization_score);
 
+  async function openArchive(rec, rank) {
+    const { files } = await api.getArchiveCandidates();
+    const total = files.reduce((s, f) => s + f.size_bytes, 0);
+    open({
+      kind: `Recommendation #${rank}`,
+      title: `Archive ${files.length} inactive file${files.length === 1 ? "" : "s"}`,
+      badges: [{ label: `${rec.risk} risk`, tone: RISK_TONE[rec.risk] }, { label: `${Math.round(rec.confidence * 100)}% confidence`, tone: "neutral" }],
+      fields: [
+        { label: "Est. saving", value: formatBytes(rec.estimated_saving_bytes), mono: true },
+        { label: "Files", value: `${files.length} · ${formatBytes(total)}`, mono: true },
+      ],
+      reason: rec.reason,
+      body: (
+        <ul className="divide-y divide-line rounded border border-line text-[12px]">
+          {files.map((f) => (
+            <li key={f.id} className="flex items-baseline justify-between gap-3 px-3 py-1.5">
+              <span className="min-w-0">
+                <span className="block truncate text-ink">{f.name}</span>
+                {f.folder_path && <span className="block truncate text-[11px] text-faint">{f.folder_path}</span>}
+              </span>
+              <span className="mono shrink-0 text-sub">{formatBytes(f.size_bytes)}</span>
+            </li>
+          ))}
+        </ul>
+      ),
+      actions: files.length
+        ? [{ label: `Archive ${files.length} into one ZIP`, variant: "primary", icon: Archive, onClick: () => setArchiving(files) }]
+        : [],
+    });
+  }
+
+  async function archive() {
+    setBusy(true);
+    try {
+      const res = await api.archiveFiles(archiving.map((f) => f.id), `cloudclean_archive_${new Date().toISOString().slice(0, 10)}.zip`);
+      toast(
+        res.failed?.length
+          ? `Archive created, but ${res.failed.length} original(s) couldn't be moved to Trash. See History.`
+          : `Archived ${archiving.length} files into ${res.archive_name} — saves ${formatBytes(res.saved_bytes)} once Drive's Trash is emptied.`,
+        res.failed?.length ? "error" : "success",
+      );
+      setArchiving(null);
+      close();
+      await load();
+    } catch (e) {
+      toast(e.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function openRec(rec, rank) {
+    if (rec.type === "archive") return openArchive(rec, rank).catch((e) => toast(e.message, "error"));
     const meta = REC_TYPE[rec.type] || REC_TYPE.review;
     open({
       kind: `Recommendation #${rank}`,
@@ -91,7 +150,7 @@ export default function Dashboard() {
       ],
       reason: rec.reason,
       actions: [
-        { label: `Open ${meta.label.toLowerCase()}`, variant: "primary", icon: ChevronRight, onClick: () => navigate(meta.to) },
+        ...(meta.to ? [{ label: `Open ${meta.label.toLowerCase()}`, variant: "primary", icon: ChevronRight, onClick: () => navigate(meta.to) }] : []),
         ...(rec.file_drive_id
           ? driveLinkActions({ drive_id: rec.file_drive_id, web_url: rec.file_web_url, parent_id: rec.file_parent_id }, links)
           : []),
@@ -102,6 +161,18 @@ export default function Dashboard() {
   return (
     <div className="space-y-5">
       <PageHeader title="Dashboard" description={`Last scan ${formatDate(analysis.completed_at)} · ${analysis.files_analyzed} files analyzed`} />
+
+      {multiple && summary && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-surface px-4 py-2.5 text-[12px] text-sub">
+          <span>
+            Showing <span className="font-medium text-ink">{active?.email}</span>. Across your{" "}
+            <span className="mono text-ink">{accounts.length}</span> linked accounts:{" "}
+            <span className="mono text-ink">{formatBytes(summary.combined.used_bytes)}</span> of{" "}
+            <span className="mono text-ink">{formatBytes(summary.combined.quota_bytes)}</span> used.
+          </span>
+          <Link to="/accounts" className="font-medium text-accent-ink hover:underline">All accounts &amp; shared duplicates →</Link>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Used" value={formatBytes(storage.used_bytes)} sub={`of ${formatBytes(storage.quota_bytes)} · ${storage.used_percent}%`} tone={storage.used_percent >= 90 ? "bad" : undefined} />
@@ -202,6 +273,21 @@ export default function Dashboard() {
           </div>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={!!archiving}
+        title={archiving ? `Archive ${archiving.length} files into one ZIP?` : ""}
+        description={archiving ? `${formatBytes(archiving.reduce((s, f) => s + f.size_bytes, 0))} in total. The ZIP is uploaded and verified before any original is touched.` : ""}
+        consequences={[
+          { kind: "undoable", text: "Originals move to Drive's Trash — restore each from History & Restore." },
+          { kind: "permanent", text: "Google empties Drive's Trash after 30 days; after that only the ZIP remains." },
+          { kind: "info", text: "Links and sharing of the originals don't carry over to the ZIP." },
+        ]}
+        confirmLabel="Archive"
+        busy={busy}
+        onConfirm={archive}
+        onCancel={() => setArchiving(null)}
+      />
     </div>
   );
 }

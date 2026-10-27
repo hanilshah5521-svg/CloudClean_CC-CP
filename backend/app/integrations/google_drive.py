@@ -73,15 +73,17 @@ def _client_config() -> dict:
     }
 
 
-def build_auth_url() -> tuple[str, str, str]:
+def build_auth_url(choose_account: bool = False) -> tuple[str, str, str]:
     """Returns (url, state, code_verifier). The caller must keep state and
     code_verifier in the user's session: state is checked on callback (CSRF),
-    and the verifier must accompany the code exchange (PKCE)."""
+    and the verifier must accompany the code exchange (PKCE). choose_account
+    shows Google's account chooser even when the browser is signed in to one."""
     flow = Flow.from_client_config(
         _client_config(), scopes=requested_scopes(), redirect_uri=settings.google_redirect_uri,
         autogenerate_code_verifier=True,
     )
-    url, state = flow.authorization_url(access_type="offline", prompt="consent", include_granted_scopes="true")
+    prompt = "select_account consent" if choose_account else "consent"
+    url, state = flow.authorization_url(access_type="offline", prompt=prompt, include_granted_scopes="true")
     return url, state, flow.code_verifier
 
 

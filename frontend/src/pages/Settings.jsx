@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button.jsx";
 import { Card, FilterPills, PageHeader, SkeletonRows } from "../components/ui/primitives.jsx";
 import { Field, Slider } from "../components/ui/controls.jsx";
 import RulesCard from "../components/RulesCard.jsx";
+import AccountCard from "../components/AccountCard.jsx";
 
 const INACTIVE = [{ value: 90, label: "90 days" }, { value: 180, label: "180 days" }, { value: 365, label: "1 year" }, { value: 730, label: "2 years" }];
 
@@ -55,9 +56,11 @@ export default function Settings() {
     <div className="space-y-4">
       <PageHeader
         title="Settings"
-        description="Thresholds used by the next scan. Nothing here changes files that are already on Drive."
+        description="Your account, and the thresholds used by the next scan. Nothing here changes files already on Drive."
         actions={<Button variant="primary" disabled={!dirty || busy} onClick={save}><Save className="h-3.5 w-3.5" /> {busy ? "Saving…" : "Save settings"}</Button>}
       />
+
+      <AccountCard />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card title="Large-file thresholds" subtitle="Files at or above these sizes are flagged for review (MB).">
@@ -82,10 +85,6 @@ export default function Settings() {
           <Field label="Minimum saving to compress (%)" hint="If the measured saving is smaller, nothing is uploaded." className="mt-4">
             {num("min_saving_percent", { min: 1, max: 90 })}
           </Field>
-        </Card>
-
-        <Card title="Gmail" subtitle="Emails at or above this size are listed on the Gmail & Photos page.">
-          <Field label="Large email threshold (MB)">{num("gmail_min_mb", { min: 1, max: 100 })}</Field>
         </Card>
       </div>
 

@@ -39,6 +39,12 @@ class User(Base):
     granted_scopes: Mapped[str] = mapped_column(Text, default="")
 
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Several Google accounts of one person share a profile key (empty = on
+    # its own). Each account keeps its own token, scans and history; the
+    # session's user_id is the account currently being worked in.
+    profile_key: Mapped[str] = mapped_column(String(32), default="", index=True)
+    # Demo Mode: 0 = the main simulated Drive, 1+ = extra simulated accounts.
+    demo_variant: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc)
 
     settings: Mapped["UserSettings"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")

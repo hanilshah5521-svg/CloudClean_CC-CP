@@ -30,6 +30,23 @@ def test_login_redirect_carries_state_and_pkce(monkeypatch):
     assert "https://www.googleapis.com/auth/gmail.modify" in query["scope"][0]
 
 
+def test_gmail_off_asks_for_drive_only_and_skips_gmail(monkeypatch):
+    from app.services.drive_service import gmail_access
+
+    _configure_oauth(monkeypatch)
+    monkeypatch.setattr(settings, "gmail_enabled", False)
+    r = TestClient(app).get("/auth/google/login", follow_redirects=False)
+    scope = parse_qs(urlparse(r.headers["location"]).query)["scope"][0]
+    assert "gmail" not in scope and "https://www.googleapis.com/auth/drive" in scope
+
+    demo = TestClient(app)
+    demo.post("/auth/demo")
+    demo.post("/api/analyze")
+    assert all(rec["type"] != "gmail" for rec in demo.get("/api/recommendations").json())
+    with SessionLocal() as db:
+        assert gmail_access(db.query(User).filter(User.is_demo.is_(True)).first()) == "disabled"
+
+
 def test_login_without_oauth_config_returns_to_connect_page(monkeypatch):
     monkeypatch.setattr(settings, "google_client_id", "")
     monkeypatch.setattr(settings, "google_client_secret", "")

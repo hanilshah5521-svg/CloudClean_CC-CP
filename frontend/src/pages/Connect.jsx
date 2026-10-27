@@ -48,7 +48,7 @@ export default function Connect() {
             <HardDrive className="h-4 w-4" strokeWidth={2} />
           </div>
           <span className="text-[17px] font-semibold text-ink">CloudClean</span>
-          <span className="ml-2 hidden text-[13px] text-sub sm:inline">Storage optimization for Google Drive, Gmail and AWS S3</span>
+          <span className="ml-2 hidden text-[13px] text-sub sm:inline">Storage optimization for Google Drive</span>
           <ThemeToggle className="ml-auto" />
         </div>
 
@@ -92,8 +92,8 @@ export default function Connect() {
               <FlaskConical className="h-4 w-4 text-warn" /> Demo Mode
             </div>
             <p className="mt-3 text-[12px] text-sub">
-              A simulated account: <span className="mono text-ink">105</span> Drive files, <span className="mono text-ink">36</span> large
-              emails and four S3 buckets — with duplicates, oversized videos and untiered data to clean up. Nothing real is touched.
+              A simulated Google Drive with <span className="mono text-ink">105</span> files — duplicates, oversized videos and
+              cluttered folders to clean up. Nothing real is touched.
             </p>
             <Button size="lg" className="mt-4 w-full" disabled={busy} onClick={startDemo}>
               Try Demo Mode

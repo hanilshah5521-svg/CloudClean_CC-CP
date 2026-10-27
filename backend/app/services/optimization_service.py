@@ -347,6 +347,38 @@ def trash_duplicate_group(db: Session, user: User, group: DuplicateGroup, keep_d
     return results
 
 
+def trash_copies_across_accounts(db: Session, owners: dict[int, User], keep_row: DriveFile,
+                                 rows: list[DriveFile]) -> list[dict]:
+    """Copies of one file spread over several linked accounts: move each copy
+    to the Trash of the account that owns it (with that account's token), and
+    record it in that account's History, so Restore works from there."""
+    kept_in = owners[keep_row.user_id].email
+    clients: dict[int, object] = {}
+    results = []
+    for file_row in rows:
+        owner = owners[file_row.user_id]
+        if file_row.is_trashed:
+            continue
+        size = file_row.size_bytes
+        try:
+            if not owner.is_demo:
+                if owner.id not in clients:
+                    clients[owner.id] = get_client(owner)
+                clients[owner.id].trash_file(file_row.drive_id)
+        except Exception as exc:  # record and carry on with the rest
+            logger.exception("Trashing %s failed", file_row.drive_id)
+            _record_action(db, owner, file_row, "trashed", size, size, "failed", f"Could not move to Trash: {_api_error(exc)}")
+            db.commit()
+            results.append({**_result(False, file_row, size, size, "Could not move to Trash."), "account_email": owner.email})
+            continue
+        file_row.is_trashed = True
+        _record_action(db, owner, file_row, "trashed", size, 0, "success",
+                       f"Removed as a copy: the same file is kept in {kept_in} as “{keep_row.name}”.")
+        db.commit()
+        results.append({**_result(True, file_row, size, 0, "Moved to Trash."), "account_email": owner.email})
+    return results
+
+
 # ---------------------------------------------------------------- archives
 
 def archive_files(db: Session, user: User, file_rows: list[DriveFile], archive_name: str) -> dict:

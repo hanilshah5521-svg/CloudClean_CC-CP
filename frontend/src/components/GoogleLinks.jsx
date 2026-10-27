@@ -27,14 +27,15 @@ export function IconLink({ href, label, icon: Icon, disabledReason }) {
   );
 }
 
-/** "Open in Drive" + "Show in folder" for one Drive file (needs drive_id, web_url, parent_id). */
-export function DriveFileLinks({ file }) {
+/** "Open in Drive" + "Show in folder" for one Drive file (needs drive_id, web_url, parent_id).
+ * `account`: the linked account's email when the file isn't in the account being worked in. */
+export function DriveFileLinks({ file, account }) {
   const links = useGoogleLinks();
   return (
     <span className="inline-flex items-center">
-      <IconLink href={links.file(file)} label="Open in Google Drive" icon={ExternalLink} disabledReason={DEMO_LINK_REASON} />
+      <IconLink href={links.file(file, account)} label="Open in Google Drive" icon={ExternalLink} disabledReason={DEMO_LINK_REASON} />
       <IconLink
-        href={links.folder(file.parent_id)}
+        href={links.folder(file.parent_id, account)}
         label="Show in its Drive folder"
         icon={FolderOpen}
         disabledReason={links.demo ? DEMO_LINK_REASON : "Not in one of your folders (shared with you)."}
@@ -66,14 +67,6 @@ export function DriveTrashLink({ className }) {
   return (
     <ButtonLink href={useGoogleLinks().driveTrash} icon={Trash2} className={className}>
       Open Drive Trash
-    </ButtonLink>
-  );
-}
-
-export function GmailTrashLink({ className }) {
-  return (
-    <ButtonLink href={useGoogleLinks().gmailTrash} icon={Trash2} className={className}>
-      Open Gmail Trash
     </ButtonLink>
   );
 }

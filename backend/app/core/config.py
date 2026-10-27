@@ -18,9 +18,10 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/auth/callback"
-    # Also request Gmail access (gmail.modify) so large emails can be found
-    # and trashed. Gmail shares the same 15 GB as Drive and Photos.
-    gmail_enabled: bool = True
+    # Off by default: the app has no Gmail screen, so sign-in asks for Drive
+    # only. True also requests gmail.modify and scans for large emails (the
+    # backend for that is kept, and tested).
+    gmail_enabled: bool = False
 
     # Signs session cookies and (unless TOKEN_ENCRYPTION_KEY is set) derives
     # the key that encrypts OAuth tokens at rest. Leave blank in development:

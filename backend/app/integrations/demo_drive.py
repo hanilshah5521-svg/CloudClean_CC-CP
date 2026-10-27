@@ -137,16 +137,84 @@ def generate_demo_files(seed: int = 42) -> list[dict]:
     return files
 
 
+# Extra simulated accounts a demo profile can link (variant -> label, Gmail + Photos share).
+LINKED_DEMO_ACCOUNTS = {1: ("college", int(0.4 * GB)), 2: ("personal", int(0.9 * GB))}
+
+
+def generate_linked_demo_files(variant: int) -> list[dict]:
+    """Another simulated Google account of the same person (variant 1 or 2).
+
+    It holds byte-identical copies of some of the main demo account's files
+    — same checksum and size, sometimes under another name — which is what
+    cross-account duplicate detection finds, plus files of its own.
+    """
+    label, _ = LINKED_DEMO_ACCOUNTS[variant]
+    rng = random.Random(1000 + variant)
+    now = datetime.now(timezone.utc)
+    files: list[dict] = []
+
+    def add(name: str, mime: str, size: int, age_days: int, checksum: str | None = None, video=None):
+        modified = now - timedelta(days=age_days)
+        fid = _mk_id(f"{label}-{name}-{len(files)}")
+        entry = {
+            "id": fid, "name": name, "mimeType": mime, "size": str(size),
+            "createdTime": (modified - timedelta(days=rng.randint(0, 40))).isoformat().replace("+00:00", "Z"),
+            "modifiedTime": modified.isoformat().replace("+00:00", "Z"),
+            "parents": ["demo-root"],  # each simulated account's own "My Drive"
+            "webViewLink": f"https://drive.google.com/file/d/{fid}/view",
+            "trashed": False,
+        }
+        if not mime.startswith("application/vnd.google-apps."):
+            entry["sha256Checksum"] = checksum or hashlib.sha256(f"{label}:{name}:{size}".encode()).hexdigest()
+        if video:
+            width, height, mbps = video
+            entry["videoMediaMetadata"] = {"width": width, "height": height,
+                                           "durationMillis": str(int(size * 8 / (mbps * 1_000_000) * 1000))}
+        files.append(entry)
+
+    # Copies of the main account's files: photos, PDFs and videos people
+    # re-upload to whichever account had space.
+    main = [f for f in generate_demo_files() if "sha256Checksum" in f and int(f["size"]) > 5 * MB
+            and not f["name"].endswith(".zip")]
+    rng.shuffle(main)
+    for f in main[: 5 + 3 * variant]:
+        name = f["name"] if rng.random() < 0.6 else f"Copy of {f['name']}"
+        add(name, f["mimeType"], int(f["size"]), rng.randint(5, 400), checksum=f["sha256Checksum"],
+            video=f.get("videoMediaMetadata") and (int(f["videoMediaMetadata"]["width"]),
+                                                   int(f["videoMediaMetadata"]["height"]), 12))
+
+    if variant == 1:  # a college account
+        for i in range(1, 4):
+            add(f"lecture_recording_{i}.mp4", "video/mp4", rng.randint(300, 900) * MB, rng.randint(30, 300), video=(1920, 1080, 8))
+        for i in range(1, 13):
+            add(f"DAA_assignment_{i}.pdf", "application/pdf", rng.randint(1, 15) * MB, rng.randint(10, 500))
+        for i in range(1, 21):
+            add(f"Screenshot ({i}).png", "image/png", rng.randint(300, 2500) * 1024, rng.randint(5, 300))
+        for i in range(1, 4):
+            add(f"mini_project_v{i}.zip", "application/zip", rng.randint(40, 250) * MB, rng.randint(60, 600))
+        for i in range(8):
+            add(f"Lab report {i}", "application/vnd.google-apps.document", 0, rng.randint(1, 400))
+    else:  # an older personal account
+        for i in range(1, 16):
+            add(f"IMG_{2000 + i * 7}.jpg", "image/jpeg", rng.randint(3, 9) * MB, rng.randint(300, 1500))
+        for i in range(1, 3):
+            add(f"phone_backup_{2019 + i}.zip", "application/zip", rng.randint(600, 1400) * MB, rng.randint(400, 1500))
+        add("birthday_party.mp4", "video/mp4", 1100 * MB, 900, video=(1920, 1080, 16))
+        add("trip_highlights.mp4", "video/mp4", 750 * MB, 700, video=(3840, 2160, 40))
+    return files
+
+
 # Simulated Gmail + Google Photos share of the quota (Google's API reports it
 # only as one number: total usage minus Drive usage).
 GMAIL_PHOTOS_BYTES = int(1.7 * GB)
 
 
-def demo_quota(drive_bytes: int, drive_trash_bytes: int) -> dict:
+def demo_quota(drive_bytes: int, drive_trash_bytes: int, variant: int = 0) -> dict:
+    gmail_photos = LINKED_DEMO_ACCOUNTS[variant][1] if variant else GMAIL_PHOTOS_BYTES
     return {
-        "used_bytes": drive_bytes + drive_trash_bytes + GMAIL_PHOTOS_BYTES,
+        "used_bytes": drive_bytes + drive_trash_bytes + gmail_photos,
         "quota_bytes": QUOTA_BYTES,
         "drive_bytes": drive_bytes,
         "drive_trash_bytes": drive_trash_bytes,
-        "gmail_photos_bytes": GMAIL_PHOTOS_BYTES,
+        "gmail_photos_bytes": gmail_photos,
     }

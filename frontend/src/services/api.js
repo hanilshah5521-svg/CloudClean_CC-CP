@@ -37,6 +37,22 @@ export const api = {
   // Which sign-in options the server offers (Google configured? Gmail requested?)
   getAuthStatus: () => request("/auth/status"),
 
+  // Linked Google accounts (one profile, several accounts)
+  getAccounts: () => request("/api/accounts"),
+  switchAccount: (id) => request(`/api/accounts/${id}/switch`, { method: "POST" }),
+  removeAccount: (id) => request(`/api/accounts/${id}`, { method: "DELETE" }),
+  addSimulatedAccount: () => request("/api/accounts/simulated", { method: "POST" }),
+  // Full-page navigation: sign in to another Google account and link it here.
+  googleLinkUrl: `${BASE_URL}/auth/google/link`,
+  scanAllAccounts: () => request("/api/accounts/scan", { method: "POST" }),
+  activeAccountScans: () => request("/api/accounts/scan"),
+  getCrossDuplicates: (accountId) => request(`/api/accounts/duplicates${accountId ? `?account_id=${accountId}` : ""}`),
+  removeCrossCopies: (keepFileId, removeFileIds) =>
+    request("/api/accounts/duplicates/remove", {
+      method: "POST",
+      body: JSON.stringify({ keep_file_id: keepFileId, remove_file_ids: removeFileIds }),
+    }),
+
   // Storage
   getStorage: () => request("/api/storage"),
   getSavings: () => request("/api/savings"),
@@ -58,12 +74,6 @@ export const api = {
   // Analytics
   getBreakdown: () => request("/api/analytics/breakdown"),
   getStorageHistory: (range = "30d") => request(`/api/analytics/history?range=${range}`),
-
-  // Files
-  getFiles: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
-    return request(`/api/files${qs ? `?${qs}` : ""}`);
-  },
 
   // Duplicates
   getDuplicates: () => request("/api/duplicates"),
@@ -89,7 +99,8 @@ export const api = {
   applySuggestion: (id) => request(`/api/rules/suggestions/${id}/apply`, { method: "POST" }),
   dismissSuggestion: (id) => request(`/api/rules/suggestions/${id}/dismiss`, { method: "POST" }),
 
-  // Archive
+  // Archive: inactive files the last scan suggested bundling into one ZIP
+  getArchiveCandidates: () => request("/api/files?filter=archive_candidate&page_size=200"),
   archiveFiles: (fileIds, archiveName) =>
     request("/api/archive", {
       method: "POST",
@@ -101,14 +112,6 @@ export const api = {
   applyOrganize: (id, folderName) =>
     request(`/api/organize/${id}/apply`, { method: "POST", body: JSON.stringify({ folder_name: folderName }) }),
   dismissOrganize: (id) => request(`/api/organize/${id}/dismiss`, { method: "POST" }),
-
-  // Gmail
-  getGmail: (params = {}) => {
-    const qs = new URLSearchParams(params).toString();
-    return request(`/api/gmail${qs ? `?${qs}` : ""}`);
-  },
-  trashGmail: (messageIds) =>
-    request("/api/gmail/trash", { method: "POST", body: JSON.stringify({ message_ids: messageIds }) }),
 
   // History
   getHistory: () => request("/api/history"),

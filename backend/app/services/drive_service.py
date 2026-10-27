@@ -13,6 +13,7 @@ from app.analyzers.compression_potential import archive_ratio
 from app.analyzers.duplicates import find_duplicate_groups
 from app.analyzers.naming import suggest_groups
 from app.analyzers.inactive import inactivity_days
+from app.core.config import settings
 from app.integrations import demo_drive, demo_gmail
 from app.integrations.gmail import GmailClient
 from app.integrations.google_drive import GMAIL_SCOPE, authorized_credentials, get_client, parse_drive_time
@@ -80,12 +81,14 @@ def _quota_and_files(db: Session, user: User, progress=_no_progress) -> tuple[di
         # of resetting itself every time "Analyze" is clicked.
         existing = db.query(DriveFile).filter(DriveFile.user_id == user.id).all()
         if not existing:
-            files = [_normalize(r) for r in demo_drive.generate_demo_files()]
-            return demo_drive.demo_quota(sum(f["size_bytes"] for f in files), 0), files
+            raw = (demo_drive.generate_linked_demo_files(user.demo_variant) if user.demo_variant
+                   else demo_drive.generate_demo_files())
+            files = [_normalize(r) for r in raw]
+            return demo_drive.demo_quota(sum(f["size_bytes"] for f in files), 0, user.demo_variant), files
         active = [_file_row_to_dict(r) for r in existing if not r.is_trashed]
         # Trashed files keep using quota until Drive's Trash is emptied.
         trash = sum(r.size_bytes for r in existing if r.is_trashed)
-        return demo_drive.demo_quota(sum(f["size_bytes"] for f in active), trash), active
+        return demo_drive.demo_quota(sum(f["size_bytes"] for f in active), trash, user.demo_variant), active
 
     client = get_client(user)
     quota = client.storage_quota()
@@ -141,7 +144,9 @@ def _organize_suggestions(user: User, files: list[dict], folders: dict, root: st
 
 
 def gmail_access(user: User) -> str:
-    """'demo' | 'granted' | 'not_granted' — whether Gmail can be scanned."""
+    """'disabled' | 'demo' | 'granted' | 'not_granted' — whether Gmail can be scanned."""
+    if not settings.gmail_enabled:
+        return "disabled"
     if user.is_demo:
         return "demo"
     return "granted" if GMAIL_SCOPE in (user.granted_scopes or "").split() else "not_granted"
@@ -151,7 +156,7 @@ def _scan_gmail(db: Session, user: User, now: datetime) -> list[dict] | None:
     """Fetch large-message metadata. Returns None when Gmail isn't available,
     so a Gmail problem never fails the Drive analysis."""
     access = gmail_access(user)
-    if access == "not_granted":
+    if access not in ("demo", "granted"):
         return None
     min_mb = user.settings.gmail_min_mb
     if access == "demo":
@@ -213,7 +218,7 @@ def run_analysis(db: Session, user: User, progress=_no_progress) -> AnalysisRun:
     recs = engine.generate_recommendations(files, dup_groups)
     score = engine.calculate_optimization_score(files, dup_groups, quota["drive_bytes"] or quota["used_bytes"])
 
-    if gmail_access(user) != "not_granted":
+    if gmail_access(user) in ("demo", "granted"):
         progress(70, "Scanning Gmail for large emails…")
     messages = _scan_gmail(db, user, now)
     if messages is not None:
