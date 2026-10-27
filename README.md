@@ -2,10 +2,14 @@
 
 **Intelligent Google Storage Optimization & Lifecycle Management Platform**
 
-CloudClean connects to your Google account, analyzes Drive file metadata and large Gmail messages
-(Drive, Gmail and Photos share one 15 GB quota), finds duplicates and compression
-opportunities, and lets you safely recover storage — with every recommendation explained and every
-destructive action requiring your explicit confirmation. It runs entirely on free, open-source
+CloudClean connects to your Google accounts, analyzes Drive file metadata (Drive, Gmail and Photos
+share one 15 GB quota per account), finds duplicates, compression and archiving opportunities, and
+lets you safely recover storage — with every recommendation explained and every destructive action
+requiring your explicit confirmation. Several Google accounts (say a personal and a college one) can
+be linked into one profile: each is scanned, you switch between them from the profile menu, and
+files stored in more than one account are found as **cross-account duplicates**. Every finding links
+straight to the file (or the Trash) in Google Drive for review, and the UI has light and dark themes.
+It runs entirely on free, open-source
 software; the only paid resource involved is optionally your own Google Cloud project (free tier is
 enough) if you connect a real Drive. **Demo Mode needs neither.**
 
@@ -19,6 +23,7 @@ enough) if you connect a real Drive. **Demo Mode needs neither.**
 - [Technology stack](#technology-stack)
 - [Quick start (Demo Mode)](#quick-start-demo-mode)
 - [Connecting a real Google Drive](#connecting-a-real-google-drive)
+- [Multiple Google accounts](#multiple-google-accounts)
 - [Running with Docker](#running-with-docker)
 - [Background worker, video compression & rules](#background-worker-video-compression--rules)
 - [Testing](#testing)
@@ -32,9 +37,9 @@ enough) if you connect a real Drive. **Demo Mode needs neither.**
 cloudclean/
   backend/            FastAPI app
     app/
-      api/routes/      HTTP endpoints (auth, storage, files, analysis, analytics,
-                        recommendations, duplicates, compression, archive, history, settings,
-                        jobs, rules)
+      api/routes/      HTTP endpoints (auth, accounts, storage, files, analysis, analytics,
+                        recommendations, duplicates, compression, archive, organize, history,
+                        settings, jobs, rules; gmail and s3 are API-only, with no page in the UI)
       core/            config, database session
       models/          SQLAlchemy ORM models
       schemas/         Pydantic request/response schemas
@@ -42,7 +47,8 @@ cloudclean/
       analyzers/       duplicate detection, large-file / inactive-file rules, compression estimates
       recommendations/ the rule-based RecommendationEngine + Optimization Score
       compression/      real Pillow/pikepdf/zipfile compression, ffmpeg video re-encoding
-      services/        orchestration: drive_service (analyze), optimization_service (compress/
+      services/        orchestration: drive_service (analyze), account_service (linked accounts,
+                        cross-account duplicates), optimization_service (compress/
                         trash/archive/restore), video_service (compress_video job), job_service
                         (the job queue), rules_service (auto-compression rules), storage_service
       security/        session auth dependency
@@ -51,8 +57,10 @@ cloudclean/
     tests/             pytest — analyzers, engine, real compression round-trips, full API flow
     data/storage_plans.json   editable Google One pricing config
   frontend/           React + Vite + Tailwind + Recharts SPA
-    src/pages/         Landing, Connect, Dashboard, FileExplorer, Duplicates, Compression,
-                        Analytics, History, Settings
+    src/pages/         Connect, Dashboard, Accounts, Duplicates, Organize, Compression,
+                        History, Analytics, Settings
+    src/components/shell/  sidebar, top bar and the profile menu (account switcher, Demo Mode,
+                        theme, sign out)
   docker/             Dockerfiles (the backend image also runs the worker)
   docker-compose.yml
   .env.example
@@ -108,9 +116,11 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**, click **Try Demo Mode**, then **Analyze Drive**. Everything after
-that — duplicates, compression (including videos), archiving, auto-compression rules, history,
-restore — operates on simulated data end to end, clearly labeled "DEMO MODE" throughout the UI.
+Open **http://localhost:5173**, click **Try Demo Mode**, then **Run Scan**. Everything after
+that — duplicates, compression (including videos), archiving, organizing, auto-compression rules,
+history, restore, and extra linked accounts (profile menu → **Add a simulated account**, up to three
+in all) — operates on simulated data end to end, clearly labeled "DEMO MODE" throughout the UI.
+Links into Google Drive are disabled in Demo Mode, since the files don't exist there.
 Demo Mode doesn't need the background worker: its jobs only simulate, so the API runs them inline.
 
 ## Connecting a real Google Drive
@@ -123,9 +133,9 @@ Go to [console.cloud.google.com](https://console.cloud.google.com) → select or
 
 ### 3. Configure the OAuth consent screen
 **APIs & Services → OAuth consent screen** → choose **External** (or Internal for a Workspace org) →
-fill in app name, support email → add scopes `.../auth/drive`, `.../auth/gmail.modify`,
-`.../auth/userinfo.email`, `.../auth/userinfo.profile` → add your own Google account under **Test users** if the app is in
-Testing mode.
+fill in app name, support email → add scopes `.../auth/drive`, `.../auth/userinfo.email`,
+`.../auth/userinfo.profile` (plus `.../auth/gmail.modify` only if you set `GMAIL_ENABLED=true`) →
+add every Google account you'll sign in or link with under **Test users** if the app is in Testing mode.
 
 ### 4. Create an OAuth client
 **APIs & Services → Credentials → Create Credentials → OAuth client ID** → Application type
@@ -144,10 +154,11 @@ for any deployment set it explicitly, and set `COOKIE_SECURE=true` when serving 
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
-Set `GMAIL_ENABLED=false` if you don't want the Gmail permission requested at all.
+`GMAIL_ENABLED` is `false` by default, so only the Drive permission is requested (see
+[Gmail and Photos](#gmail-and-photos)).
 
-Restart the backend. The Connect page's "Connect Google Drive" button now redirects to Google's
-real consent screen.
+Restart the backend. The Connect page's "Connect Google Drive" button (also in the profile menu at
+the top right and under **Settings → Account**) now redirects to Google's real consent screen.
 
 ### 6. Start the background worker
 With a real account, analysis, video compression and large undos run in the worker. Start it in a
@@ -159,10 +170,38 @@ Without it, jobs wait in the queue and the UI says that no worker is running.
 
 **Scope note:** CloudClean requests the broad `drive` scope, not `drive.file`, because it needs to
 read metadata and move to Trash files it did not itself create — that is the whole point of the
-product. `gmail.modify` lets it list large messages and move them to Gmail's Trash (never the
-`mail.google.com` scope, which would allow permanent deletion). Both are *restricted* scopes: fine
-for an app in Testing mode with listed test users, but a public launch needs Google's verification.
-Users can untick Gmail on the consent screen; Drive analysis keeps working without it.
+product. It is a *restricted* scope: fine for an app in Testing mode with listed test users, but a
+public launch needs Google's verification. With `GMAIL_ENABLED=true`, `gmail.modify` is requested
+too (never the `mail.google.com` scope, which would allow permanent deletion); users can untick it on
+the consent screen and Drive analysis keeps working without it.
+
+## Multiple Google accounts
+
+Many people spread their files over several free 15 GB accounts and lose track of what is where.
+CloudClean links them into one **profile**:
+
+- **Adding an account:** profile menu (top right) → **Add Google account**. Google's account chooser
+  opens (`prompt=select_account consent`), and the account you pick is linked to your profile while
+  you keep working in the current one. Signing in later with *any* linked account opens the same
+  profile. In Demo Mode the same button adds a **simulated account** (a "college" and a "personal"
+  Drive holding copies of some of the main account's files), up to three accounts in all.
+- **Switching:** the profile menu lists every linked account; picking one switches the whole app —
+  Dashboard, Duplicates, Compression, History — to that account's data. Each account keeps its own
+  scan, settings and History.
+- **Scanning:** **Run Scan** scans every linked account (one background job each) and the progress
+  bar shows them together.
+- **Accounts page:** used and free space per account and across all of them (free space isn't
+  poolable — each account is still capped at its own 15 GB), plus **copies across accounts**: files
+  with the same content checksum and size stored in two or more accounts, filterable by account.
+  CloudClean suggests keeping the copy in the account with the most free space; you can pick another,
+  and removing the others moves them to *their own account's* Trash, recorded in that account's
+  History, where Restore works as usual.
+- **Removing an account** from the profile (Accounts page or Settings → Account) only unlinks it and
+  deletes CloudClean's cached data for it — nothing in that Google account is touched. You can't
+  remove the account you're currently working in; switch away first.
+
+Links into Drive carry `?authuser=<email>`, so a file in a linked account opens in that account
+even when the browser's default Google account is a different one.
 
 ## Running with Docker
 
@@ -266,7 +305,10 @@ methods: with ffmpeg installed they generate a 2-second clip, re-encode it, chec
 with ffprobe and Undo it back to the original bytes (skipped without ffmpeg); the rest (failed
 upload, HDR skip, temp-file cleanup, undo) use a stand-in encoder and always run. Rule tests cover
 suggestions, auto-apply (off by default, capped), never redoing an undone compression, the live
-re-check and the nightly schedule.
+re-check and the nightly schedule. The multi-account tests cover linking simulated and real
+(mocked OAuth) accounts, scanning each, switching, removing, cross-account duplicates (detection,
+the recommended copy to keep, the account filter, removal recorded in the owning account's History)
+and isolation between profiles.
 
 The original suite covers: duplicate detection (all three match levels), inactivity/size-tier rules,
 compression-potential estimation, the recommendation engine (explainability + score bounds), *real*
@@ -280,8 +322,9 @@ SQLite column auto-migration.
 
 The frontend was verified manually in-browser (not scripted with Playwright — see stack rationale
 above): Demo Mode connect → analyze → view score/recommendations → confirm a duplicate trash → run
-a real PDF compression → verify the byte counts in History → browse Analytics and File Explorer,
-including multi-select archive; and, for background jobs: analyze from the Dashboard, compress a video
+a real PDF compression → verify the byte counts in History → browse Analytics → archive inactive
+files from the Dashboard recommendation; for multiple accounts: add two simulated accounts, scan all,
+remove a cross-account copy and find it in the owning account's History; and, for background jobs: analyze from the Dashboard, compress a video
 from the Compression page, add a rule in Settings (auto-apply asks for confirmation), run it, apply
 one of its suggestions and Undo the compression from History.
 
@@ -315,11 +358,20 @@ through disk by the background worker — see [Video compression](#video-compres
 
 ### Gmail and Photos
 Drive, Gmail and Photos share one quota. The Dashboard splits usage into Drive, Drive Trash (which
-still counts until emptied) and Gmail + Photos (Google reports those two only as one number). The
-Gmail page lists messages above a configurable size (metadata only: size, sender, subject, date) and
-can move selected ones to Gmail's Trash, restorable from History. Google Photos can't be cleaned up
-by third-party apps since Google restricted the Photos Library API in March 2025, so the app links
-to Google's own storage manager for that.
+still counts until emptied) and Gmail + Photos (Google reports those two only as one number).
+CloudClean itself works on Drive only. Gmail cleanup is off by default (`GMAIL_ENABLED=false`) and
+has no page in the UI; with `GMAIL_ENABLED=true` the backend still requests `gmail.modify`, lists
+large messages and can move them to Gmail's Trash through the `/api/gmail` endpoints. Google Photos
+can't be cleaned up by third-party apps since Google restricted the Photos Library API in March 2025.
+
+### Reviewing in Google Drive
+Duplicates, compression candidates, cross-account copies and Trash notices each have **Open in
+Drive** / **Show in its Drive folder** links, so you can look at a file in Drive before acting on it, and an
+**Open Drive Trash** link after moving files there.
+
+### Organizing
+The Organize page groups loose files that follow one naming pattern (`budget_1…10.xlsx`) and moves
+each group into a folder of its own; links don't change, and Undo in History moves them back.
 
 ### Storage savings calculation
 The Optimization Score (0–100) is a fully transparent deduction from 100: each inefficiency factor
@@ -386,13 +438,17 @@ never a generic message.
   rather than fetching everything at once, but very large accounts may still take a while to analyze.
 - A file being old is never treated as proof it's unnecessary — inactive-file language throughout
   the app says "potentially inactive," and archiving (not deletion) is the only action offered.
+- Linked accounts' free space can't be pooled, and CloudClean doesn't yet *move* files between
+  accounts (Drive only allows that as an ownership transfer the other account must accept). Removing
+  cross-account copies is the way to rebalance today.
 
-## AWS S3
+## AWS S3 (backend only)
 
-CloudClean also analyzes **Amazon S3**, where the savings work differently: the same bytes cost up to
-~23x less depending on their *storage class*, so savings are shown in **dollars per month** rather than
-GB. Open **AWS S3** in the sidebar and either click **Start S3 demo** (a simulated account with four
-buckets — nothing real is touched) or connect your own AWS account.
+The S3 page was removed from the UI to keep CloudClean focused on Google storage, but the backend
+module and its tests remain, and the `/api/s3` endpoints still work. In S3 the savings work
+differently: the same bytes cost up to ~23x less depending on their *storage class*, so savings are
+shown in **dollars per month** rather than GB. `POST /api/s3/connect-demo` starts a simulated account with
+four buckets (nothing real is touched); `POST /api/s3/connect` takes your own AWS access key.
 
 ### How the Drive features map onto S3
 
@@ -410,15 +466,15 @@ plus the trade-offs (retrieval fees, minimum storage durations, Deep Archive's 1
 Each object's bytes count toward at most one saving (duplicates, then compression, then tiering).
 Lifecycle rules are **previewed as JSON** and **merged** into the bucket's existing rules — S3's API
 replaces the whole configuration, so CloudClean always writes back the rules it didn't create.
-Every change is listed under **S3 History** with an **Undo** (removing a rule doesn't move objects
+Every change is recorded in an S3 history with an **Undo** (removing a rule doesn't move objects
 back; it only stops future transitions — the undo message says so).
 
 ### Connecting a real AWS account
 
 1. In the AWS console, create an IAM user for CloudClean and attach a policy with only the permissions
-   it needs — the app shows it under **Show IAM policy** (also at `GET /api/s3/iam-policy`). Leave out
+   it needs — `GET /api/s3/iam-policy` returns it. Leave out
    the "CloudCleanOptimize" statement for a read-only analysis.
-2. Create an access key for that user and paste it into the Connect form with your default region.
+2. Create an access key for that user and send it to `POST /api/s3/connect` with your default region.
    CloudClean checks the key with AWS STS and stores it encrypted (same Fernet encryption as the
    Google tokens).
 
