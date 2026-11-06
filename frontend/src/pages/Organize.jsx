@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowRight, Folder, FolderInput, FolderOpen, FolderPlus } from "lucide-react";
 import { api } from "../services/api.js";
+import { accountTone, useAccounts } from "../context/accounts.jsx";
 import { useScan } from "../context/scan.jsx";
 import { useToast } from "../hooks/useToast.jsx";
 import { useGoogleLinks } from "../hooks/useGoogleLinks.js";
 import { IconLink } from "../components/GoogleLinks.jsx";
 import { DEMO_LINK_REASON } from "../components/details.js";
 import { Button } from "../components/ui/button.jsx";
-import { Badge, Card, EmptyState, PageHeader, SkeletonRows } from "../components/ui/primitives.jsx";
+import { Badge, Card, EmptyState, FilterPills, PageHeader, SkeletonRows } from "../components/ui/primitives.jsx";
 import { Field } from "../components/ui/controls.jsx";
 import { ConfirmDialog } from "../components/ui/dialog.jsx";
 import { formatBytes } from "../utils/format.js";
@@ -17,7 +18,9 @@ export default function Organize() {
   const [names, setNames] = useState({});
   const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("");
   const { version } = useScan();
+  const { accounts, active, multiple } = useAccounts();
   const toast = useToast();
   const links = useGoogleLinks();
 
@@ -39,7 +42,8 @@ export default function Organize() {
     setBusy(true);
     try {
       const res = await api.applyOrganize(confirm.id, names[confirm.id]);
-      toast(res.message, res.failed?.length ? "error" : "success");
+      const elsewhere = res.account_email && res.account_email !== active?.email ? ` Recorded in the History of ${res.account_email}.` : "";
+      toast(`${res.message}${elsewhere}`, res.failed?.length ? "error" : "success");
       setConfirm(null);
       await load();
     } catch (e) {
@@ -59,20 +63,37 @@ export default function Organize() {
   }
 
   if (!suggestions) return <Card bodyClassName="p-0"><SkeletonRows rows={6} /></Card>;
+  const shown = filter ? suggestions.filter((s) => String(s.account_id) === filter) : suggestions;
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Organize"
-        description="Loose files sharing one naming pattern (a prefix followed by a counter, date or timestamp) gathered into one folder. Files are moved, not copied — links and sharing stay the same."
+        description={`Loose files sharing one naming pattern (a prefix followed by a counter, date or timestamp) gathered into one folder. Files are moved, not copied — links and sharing stay the same.${multiple ? " Covers all your linked accounts; each folder is made in the account the files are in." : ""}`}
       />
 
-      {suggestions.length === 0 ? (
+      {multiple && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-faint">Show suggestions in</span>
+          <FilterPills
+            options={[{ value: "", label: "All accounts" }, ...accounts.map((a) => ({
+              value: String(a.id), label: `${a.email.split("@")[0]} (${suggestions.filter((s) => s.account_id === a.id).length})`,
+            }))]}
+            value={filter}
+            onChange={setFilter}
+          />
+        </div>
+      )}
+
+      {shown.length === 0 ? (
         <Card>
-          <EmptyState icon={FolderInput} title="Nothing to organize" subtitle="No folder has 3 or more loose files sharing a naming pattern. Run a scan after adding files." />
+          <EmptyState icon={FolderInput} title="Nothing to organize"
+                      subtitle={filter
+                        ? "This account has no folder with 3 or more loose files sharing a naming pattern."
+                        : "No folder has 3 or more loose files sharing a naming pattern. Run a scan after adding files."} />
         </Card>
       ) : (
-        suggestions.map((s) => {
+        shown.map((s) => {
           const name = (names[s.id] ?? s.folder_name).trim();
           const reuses = s.uses_existing_folder && name.toLowerCase() === s.folder_name.toLowerCase();
           return (
@@ -82,8 +103,9 @@ export default function Organize() {
               subtitle={<span><span className="mono">{s.count}</span> files · <span className="mono">{formatBytes(s.total_bytes)}</span> · in {s.parent_name}</span>}
               action={
                 <span className="flex items-center gap-1">
+                  {multiple && <Badge tone={accountTone(accounts, s.account_id)}>{s.account_email.split("@")[0]}</Badge>}
                   {reuses ? <Badge tone="ok">Uses existing folder</Badge> : <Badge tone="accent">New folder</Badge>}
-                  <IconLink href={links.folder(s.parent_id)} label={`Open ${s.parent_name} in Drive`} icon={FolderOpen} disabledReason={DEMO_LINK_REASON} />
+                  <IconLink href={links.folder(s.parent_id, s.account_email)} label={`Open ${s.parent_name} in Drive`} icon={FolderOpen} disabledReason={DEMO_LINK_REASON} />
                 </span>
               }
             >
@@ -109,7 +131,7 @@ export default function Organize() {
       <ConfirmDialog
         open={!!confirm}
         title={confirm ? `Move ${confirm.count} files into “${(names[confirm.id] || "").trim()}”?` : ""}
-        description={confirm ? `Inside ${confirm.parent_name}.` : ""}
+        description={confirm ? `Inside ${confirm.parent_name}${multiple ? `, in ${confirm.account_email}` : ""}.` : ""}
         consequences={[
           { kind: "undoable", text: "Undo from History & Restore moves every file back to where it was." },
           { kind: "info", text: "Files keep their IDs, share links and permissions — only their folder changes." },

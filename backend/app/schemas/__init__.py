@@ -105,6 +105,9 @@ class ActionHistoryOut(BaseModel):
     can_free_space: bool
     original_delete_at: datetime | None = None
     created_at: datetime
+    # The linked account the action ran in (History covers every linked account).
+    account_id: int | None = None
+    account_email: str = ""
 
 
 class SettingsUpdate(BaseModel):
@@ -178,3 +181,6 @@ class SuggestionOut(BaseModel):
     job_id: int | None
     detail: str
     created_at: datetime
+    # The linked account the file is in (set by the suggestions list).
+    account_id: int | None = None
+    account_email: str = ""

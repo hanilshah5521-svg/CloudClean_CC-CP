@@ -33,6 +33,29 @@ def linked_users(db: Session, user: User) -> list[User]:
     return db.query(User).filter(User.profile_key == user.profile_key).order_by(User.id).all()
 
 
+def members_by_id(db: Session, user: User) -> dict[int, User]:
+    """{account id: User} for every account in user's profile. Pages that list
+    findings (duplicates, organize, compression) cover all of them, and an
+    action on a file runs in the account that owns it, with that account's
+    own Google permission, and is recorded in that account's History."""
+    return {m.id: m for m in linked_users(db, user)}
+
+
+def owner_fields(member: User) -> dict:
+    return {"account_id": member.id, "account_email": member.email}
+
+
+def scoped_members(db: Session, user: User, account_id: int | None) -> dict[int, User]:
+    """members_by_id, narrowed to one account when account_id is given (an
+    "account" filter on History or Analytics). AccountError if it isn't linked."""
+    members = members_by_id(db, user)
+    if account_id is None:
+        return members
+    if account_id not in members:
+        raise AccountError("Account not found in this profile.")
+    return {account_id: members[account_id]}
+
+
 def linked_user(db: Session, user: User, account_id: int) -> User:
     target = next((u for u in linked_users(db, user) if u.id == account_id), None)
     if target is None:  # another profile's account looks exactly like a missing one
@@ -117,16 +140,25 @@ def account_summary(db: Session, user: User, google_configured: bool) -> dict:
             "drive_bytes": snap.drive_bytes if snap else None,
             "drive_trash_bytes": snap.drive_trash_bytes if snap else None,
             "gmail_photos_bytes": snap.gmail_photos_bytes if snap else None,
+            # School/work account on the organization's shared storage (see StorageSnapshot.pooled).
+            "pooled": bool(snap and snap.pooled),
+            "org_used_bytes": snap.org_used_bytes if snap else None,
+            "org_quota_bytes": snap.org_quota_bytes if snap else None,
         })
-    scanned = [a for a in accounts if a["quota_bytes"]]
+    scanned = [a for a in accounts if a["used_bytes"] is not None]
+    # Only personal accounts have a quota of their own; a pooled account adds
+    # its owner's usage but none of the organization's capacity.
+    personal = [a for a in scanned if not a["pooled"]]
     can_add = (len(accounts) < MAX_DEMO_ACCOUNTS) if user.is_demo else google_configured
     return {
         "active_id": user.id,
         "accounts": accounts,
         "combined": {
             "used_bytes": sum(a["used_bytes"] for a in scanned),
-            "quota_bytes": sum(a["quota_bytes"] for a in scanned),
+            "quota_bytes": sum(a["quota_bytes"] for a in personal),
+            "free_bytes": sum(max(0, a["quota_bytes"] - a["used_bytes"]) for a in personal),
             "scanned_accounts": len(scanned),
+            "pooled_accounts": len(scanned) - len(personal),
         },
         "can_add": can_add,
         "add_kind": "simulated" if user.is_demo else "google",
@@ -136,8 +168,13 @@ def account_summary(db: Session, user: User, google_configured: bool) -> dict:
 # ------------------------------------------------- duplicates across accounts
 
 def _free_bytes(db: Session, member: User) -> int:
+    """Free space in the account's own quota. A school/work account on shared
+    storage counts as 0: there's no personal allowance to rely on, and such
+    accounts usually close when you leave — keep copies elsewhere."""
     snap = _latest(db, StorageSnapshot, member.id, StorageSnapshot.created_at)
-    return (snap.quota_bytes - snap.used_bytes) if snap and snap.quota_bytes else 0
+    if not snap or snap.pooled or not snap.quota_bytes:
+        return 0
+    return snap.quota_bytes - snap.used_bytes
 
 
 def _copy_groups(db: Session, members: list[User]) -> list[list[DriveFile]]:

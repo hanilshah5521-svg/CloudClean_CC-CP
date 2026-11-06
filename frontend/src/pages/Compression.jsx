@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronRight, Film, Image, Play, TriangleAlert } from "lucide-react";
 import { api } from "../services/api.js";
+import { accountTone, useAccounts } from "../context/accounts.jsx";
 import { useScan } from "../context/scan.jsx";
 import { useToast } from "../hooks/useToast.jsx";
 import { isActive, useJobs } from "../hooks/useJobs.js";
 import { Button } from "../components/ui/button.jsx";
-import { Badge, Card, EmptyState, Notice, PageHeader, SkeletonRows } from "../components/ui/primitives.jsx";
+import { Badge, Card, EmptyState, FilterPills, Notice, PageHeader, SkeletonRows } from "../components/ui/primitives.jsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/controls.jsx";
 import { JobStatus, StagePills } from "../components/ui/progress.jsx";
 import { DriveFileLinks } from "../components/GoogleLinks.jsx";
@@ -19,8 +20,17 @@ export default function Compression() {
   const [data, setData] = useState(null);
   const [working, setWorking] = useState(null);
   const [completed, setCompleted] = useState([]); // finished this session: estimate vs actual
+  const [filter, setFilter] = useState(""); // account id, "" = every linked account
   const { version } = useScan();
+  const { accounts, active, multiple } = useAccounts();
   const toast = useToast();
+
+  /** Small chip naming the linked account a file is in (only when several are linked). */
+  const accountBadge = (item) =>
+    multiple && item.account_email ? (
+      <Badge tone={accountTone(accounts, item.account_id)}>{item.account_email.split("@")[0]}</Badge>
+    ) : null;
+  const elsewhere = (email) => (email && email !== active?.email ? ` Recorded in the History of ${email}.` : "");
 
   const load = useCallback(async () => {
     const [files, videos, suggestions] = await Promise.all([
@@ -39,7 +49,7 @@ export default function Compression() {
     const res = job.result;
     const name = job.payload?.file_name || "File";
     if (job.status === "failed") toast(job.error || "Compression failed.", "error");
-    else if (res?.success) toast(`${name} compressed — saved ${formatBytes(res.saved_bytes)} (${res.reduction_percent}%).`);
+    else if (res?.success) toast(`${name} compressed — saved ${formatBytes(res.saved_bytes)} (${res.reduction_percent}%).${elsewhere(job.account_email)}`);
     else toast(res?.message || "No meaningful saving, so the original was kept.", "error");
     const estimate = data?.videos.candidates.find((c) => c.drive_id === key)?.estimated_saving_bytes;
     recordResult(name, estimate, res);
@@ -61,7 +71,7 @@ export default function Compression() {
     setWorking(c.file_id);
     try {
       const res = await api.compressFile(c.file_id);
-      toast(res.message, res.success ? "success" : "error");
+      toast(`${res.message}${res.success ? elsewhere(res.account_email) : ""}`, res.success ? "success" : "error");
       recordResult(c.name, c.estimated_saving_bytes, res);
       await load();
     } catch (e) {
@@ -83,14 +93,36 @@ export default function Compression() {
   }
 
   if (!data) return <Card bodyClassName="p-0"><SkeletonRows rows={8} /></Card>;
-  const { files, videos, suggestions } = data;
+  const mine = (item) => !filter || String(item.account_id) === filter;
+  const files = data.files.filter(mine);
+  const suggestions = data.suggestions.filter(mine);
+  const videos = {
+    ...data.videos,
+    candidates: data.videos.candidates.filter(mine),
+    not_suggested: (data.videos.not_suggested || []).filter(mine),
+  };
+  const countFor = (id) =>
+    [data.files, data.videos.candidates, data.suggestions].reduce((n, list) => n + list.filter((x) => x.account_id === id).length, 0);
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Compression"
-        description="Each file is replaced in place by a smaller version — same file ID, link, sharing and folder. The original stays restorable from History; if Drive keeps it “forever”, CloudClean deletes it after 30 days (or sooner with Free space now)."
+        description={`Each file is replaced in place by a smaller version — same file ID, link, sharing and folder. The original stays restorable from History; if Drive keeps it “forever”, CloudClean deletes it after 30 days (or sooner with Free space now).${multiple ? " Covers all your linked accounts; each file is compressed in the account it's in." : ""}`}
       />
+
+      {multiple && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-faint">Show files in</span>
+          <FilterPills
+            options={[{ value: "", label: "All accounts" }, ...accounts.map((a) => ({
+              value: String(a.id), label: `${a.email.split("@")[0]} (${countFor(a.id)})`,
+            }))]}
+            value={filter}
+            onChange={setFilter}
+          />
+        </div>
+      )}
 
       {completed.length > 0 && (
         <Card title="Completed this session" subtitle="Estimated before vs. measured after." bodyClassName="p-0">
@@ -144,7 +176,10 @@ export default function Compression() {
                         <tr className="align-top">
                           <td className="td max-w-[260px] py-2">
                             <div className="truncate font-medium">{c.name}</div>
-                            <Badge tone={CONF_TONE[c.confidence_label]} className="mt-1">{c.confidence_label} confidence</Badge>
+                            <span className="mt-1 flex flex-wrap gap-1">
+                              {accountBadge(c)}
+                              <Badge tone={CONF_TONE[c.confidence_label]}>{c.confidence_label} confidence</Badge>
+                            </span>
                           </td>
                           <td className="td mono py-2 text-sub">
                             <div>{c.width}×{c.height}</div>
@@ -158,7 +193,7 @@ export default function Compression() {
                           <td className="td mono py-2 text-right text-ok-ink">{formatBytes(c.estimated_saving_bytes)}</td>
                           <td className="td py-2">
                             <div className="flex items-center justify-end gap-1">
-                              <DriveFileLinks file={c} />
+                              <DriveFileLinks file={c} account={c.account_email} />
                               <Button
                                 variant="primary"
                                 size="sm"
@@ -199,12 +234,15 @@ export default function Compression() {
                   {videos.not_suggested.map((v) => (
                     <li key={v.file_id} className="flex items-start justify-between gap-4 px-4 py-2.5">
                       <div className="min-w-0">
-                        <div className="truncate text-[13px] font-medium text-ink">{v.name}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-[13px] font-medium text-ink">{v.name}</span>
+                          {accountBadge(v)}
+                        </div>
                         <div className="mt-0.5 text-[12px] text-sub">{v.reason}</div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="mono text-[13px] text-sub">{formatBytes(v.size_bytes)}</span>
-                        <DriveFileLinks file={v} />
+                        <DriveFileLinks file={v} account={v.account_email} />
                       </div>
                     </li>
                   ))}
@@ -223,6 +261,7 @@ export default function Compression() {
                 <table className="w-full text-[13px]">
                   <thead className="border-b border-line">
                     <tr>
+                      {multiple && <th className="th">Account</th>}
                       <th className="th">File</th><th className="th">Method</th><th className="th">Confidence</th>
                       <th className="th text-right">Current</th><th className="th text-right">Estimated</th>
                       <th className="th text-right">Saving</th><th className="th" />
@@ -231,7 +270,8 @@ export default function Compression() {
                   <tbody className="divide-y divide-line">
                     {files.map((c) => (
                       <tr key={c.file_id}>
-                        <td className="td max-w-[300px] truncate font-medium">{c.name}</td>
+                        {multiple && <td className="td">{accountBadge(c)}</td>}
+                        <td className="td max-w-[300px] truncate font-medium" title={c.name}>{c.name}</td>
                         <td className="td mono text-[12px] text-sub">{c.method}</td>
                         <td className="td"><Badge tone={CONF_TONE[c.confidence_label]}>{c.confidence_label}</Badge></td>
                         <td className="td mono text-right">{formatBytes(c.current_size_bytes)}</td>
@@ -239,7 +279,7 @@ export default function Compression() {
                         <td className="td mono text-right text-ok-ink">{formatBytes(c.estimated_saving_bytes)}</td>
                         <td className="td">
                           <div className="flex items-center justify-end gap-1">
-                            <DriveFileLinks file={c} />
+                            <DriveFileLinks file={c} account={c.account_email} />
                             <Button variant="primary" size="sm" disabled={working === c.file_id} onClick={() => compressNow(c)}>
                               {working === c.file_id ? "Compressing…" : "Compress"}
                             </Button>
@@ -272,7 +312,10 @@ export default function Compression() {
                     <li key={s.id} className="space-y-2 px-4 py-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="truncate text-[13px] font-medium text-ink">{s.file_name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="truncate text-[13px] font-medium text-ink">{s.file_name}</span>
+                            {accountBadge(s)}
+                          </div>
                           <div className="text-[12px] text-sub">
                             {CATEGORY_LABEL[s.category] || s.category} · <span className="mono">{formatBytes(s.size_bytes)}</span> · could save ~
                             <span className="mono">{formatBytes(s.estimated_saving_bytes)}</span>

@@ -1,17 +1,25 @@
 import { useEffect, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ChartColumn } from "lucide-react";
+import { ChartColumn, PiggyBank } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../services/api.js";
+import { accountTone, useAccounts } from "../context/accounts.jsx";
 import { useScan } from "../context/scan.jsx";
 import { useTheme } from "../context/theme.jsx";
 import { DriveTrashNotice } from "../components/GoogleLinks.jsx";
-import { Card, EmptyState, FilterPills, PageHeader, SkeletonRows, Stat } from "../components/ui/primitives.jsx";
+import { Badge, Card, EmptyState, FilterPills, PageHeader, SkeletonRows, Stat } from "../components/ui/primitives.jsx";
 import { formatBytes, formatDate } from "../utils/format.js";
 
 const RANGES = [{ value: "7d", label: "7 days" }, { value: "30d", label: "30 days" }, { value: "90d", label: "90 days" }, { value: "all", label: "All time" }];
 const BUCKETS = ["30+ days", "90+ days", "180+ days", "1+ year", "2+ years"];
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
+// History action types, grouped the way people think of them.
+const SAVED_KINDS = [
+  { label: "Compression", actions: ["compressed"] },
+  { label: "Moved to Trash", actions: ["trashed", "gmail_trashed"], sub: "duplicates & files; freed once Trash empties" },
+  { label: "Archived into ZIPs", actions: ["archive_created", "archived"] },
+];
 
 function ChartTip({ active, payload, label, unit = "GB" }) {
   if (!active || !payload?.length) return null;
@@ -29,20 +37,27 @@ function ChartTip({ active, payload, label, unit = "GB" }) {
 
 export default function Analytics() {
   const [range, setRange] = useState("30d");
+  const [filter, setFilter] = useState(""); // account id, "" = every linked account
   const [data, setData] = useState(null);
   const { version } = useScan();
+  const { accounts, multiple } = useAccounts();
   const { colors: c } = useTheme();
 
   useEffect(() => {
-    Promise.all([api.getBreakdown(), api.getStorageHistory(range), api.getStorage()]).then(
-      ([breakdown, history, storage]) => setData({ breakdown, history, storage }),
+    const accountId = filter || undefined;
+    Promise.all([api.getBreakdown(accountId), api.getStorageHistory(range, accountId), api.getHistorySummary(accountId)]).then(
+      ([breakdown, history, saved]) => setData({ breakdown, history, saved }),
       () => setData({ error: true }),
     );
-  }, [range, version]);
+  }, [range, filter, version]);
 
   if (!data) return <Card bodyClassName="p-0"><SkeletonRows rows={8} /></Card>;
   if (data.error) return <Card><EmptyState icon={ChartColumn} title="Analytics unavailable" subtitle="Run a scan first." /></Card>;
-  const { breakdown, history, storage } = data;
+  const { breakdown, history, saved } = data;
+  const savedBy = (actions) => actions.reduce((n, a) => n + (saved.by_action[a]?.saved_bytes || 0), 0);
+  const countBy = (actions) => actions.reduce((n, a) => n + (saved.by_action[a]?.count || 0), 0);
+  const savedTrend = saved.timeline.map((p) => ({ date: formatDate(p.date), Saved: p.cumulative_bytes / GB }));
+  const trashBytes = breakdown.drive_trash_bytes || 0;
 
   const byType = [...breakdown.by_category].sort((a, b) => b.size_bytes - a.size_bytes).map((c) => ({ name: c.category, GB: c.size_bytes / GB, count: c.count }));
   const largest = breakdown.largest_files.map((f) => ({ name: f.name.length > 22 ? `${f.name.slice(0, 20)}…` : f.name, MB: f.size_bytes / MB }));
@@ -54,23 +69,83 @@ export default function Analytics() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Analytics" description="Built from your analysis runs — nothing here is estimated beyond what each label says." />
+      <PageHeader
+        title="Analytics"
+        description={`Built from your scans and History — nothing here is estimated beyond what each label says. Everything is kept in CloudClean's database, so it stays after restarts.${multiple ? " Shows all linked accounts together, or pick one." : ""}`}
+      />
+
+      {multiple && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-faint">Show</span>
+          <FilterPills
+            options={[{ value: "", label: "All accounts" }, ...accounts.map((a) => ({ value: String(a.id), label: a.email.split("@")[0] }))]}
+            value={filter}
+            onChange={setFilter}
+          />
+        </div>
+      )}
+
+      <Card
+        title="Saved by CloudClean"
+        subtitle={saved.first_action_at ? `All time, since ${formatDate(saved.first_action_at)} · from History, undone actions excluded` : "From History: every compression, trash and archive that's still in effect"}
+        action={<Link to="/history" className="text-[12px] font-medium text-accent-ink hover:underline">History & Restore →</Link>}
+      >
+        {saved.actions === 0 ? (
+          <EmptyState icon={PiggyBank} title="Nothing saved yet" subtitle="Compress, archive or trash something and the space it saves is counted here — for good." />
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Stat label="Total saved" value={formatBytes(saved.saved_bytes)} tone="ok" sub={`${saved.actions} action${saved.actions === 1 ? "" : "s"} recorded`} />
+              {SAVED_KINDS.map((k) => (
+                <Stat key={k.label} label={k.label} value={formatBytes(savedBy(k.actions))}
+                      sub={k.sub ? `${countBy(k.actions)} · ${k.sub}` : `${countBy(k.actions)} file${countBy(k.actions) === 1 ? "" : "s"}`} />
+              ))}
+            </div>
+            {savedTrend.length > 1 && (
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={savedTrend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={c.track} vertical={false} />
+                  <XAxis dataKey="date" tick={AXIS} axisLine={false} tickLine={false} />
+                  <YAxis tick={AXIS} axisLine={false} tickLine={false} width={44} unit=" GB" />
+                  <Tooltip content={<ChartTip />} />
+                  <Area type="stepAfter" dataKey="Saved" name="Saved so far" stroke={c.ok} fill={c.ok} fillOpacity={0.1} strokeWidth={1.5} />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+            {multiple && !filter && (
+              <ul className="divide-y divide-line rounded border border-line">
+                {saved.by_account.map((a) => (
+                  <li key={a.account_id} className="flex items-center justify-between gap-3 px-3 py-2 text-[13px]">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Badge tone={accountTone(accounts, a.account_id)}>{a.account_email.split("@")[0]}</Badge>
+                      <span className="truncate text-sub">{a.account_email}</span>
+                    </span>
+                    <span className="text-sub">
+                      <span className="mono text-ok-ink">{formatBytes(a.saved_bytes)}</span> · {a.actions} action{a.actions === 1 ? "" : "s"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </Card>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Duplicate copies" value={formatBytes(breakdown.duplicate_storage_bytes)} />
         <Stat label="Est. compressible" value={formatBytes(breakdown.compressible_storage_bytes)} />
         <Stat label="Not modified 1+ year" value={formatBytes(oldBytes)} />
-        <Stat label="In Drive Trash" value={formatBytes(storage.drive_trash_bytes)} tone={storage.drive_trash_bytes ? "warn" : undefined} sub="auto-emptied after 30 days" />
+        <Stat label="In Drive Trash" value={formatBytes(trashBytes)} tone={trashBytes ? "warn" : undefined} sub="auto-emptied after 30 days" />
       </div>
 
-      {storage.drive_trash_bytes > 0 && (
+      {trashBytes > 0 && (
         <DriveTrashNotice>
-          <span className="mono">{formatBytes(storage.drive_trash_bytes)}</span> in Drive&apos;s Trash still counts toward your quota. Google deletes each item 30
+          <span className="mono">{formatBytes(trashBytes)}</span> in Drive&apos;s Trash still counts toward your quota. Google deletes each item 30
           days after it was trashed; emptying the Trash in Drive frees it sooner.
         </DriveTrashNotice>
       )}
 
-      <Card title="Storage over time" subtitle="Recorded at each analysis run" action={<FilterPills options={RANGES} value={range} onChange={setRange} />}>
+      <Card title="Storage over time" subtitle={multiple && !filter ? "Recorded at each scan · all accounts added up" : "Recorded at each scan"} action={<FilterPills options={RANGES} value={range} onChange={setRange} />}>
         {history.insufficient_history ? (
           <EmptyState title="Not enough history yet" subtitle="Run at least two scans over time to see a trend." />
         ) : (

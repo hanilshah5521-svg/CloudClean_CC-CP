@@ -16,7 +16,9 @@ from app.analyzers.inactive import inactivity_days
 from app.core.config import settings
 from app.integrations import demo_drive, demo_gmail
 from app.integrations.gmail import GmailClient
-from app.integrations.google_drive import GMAIL_SCOPE, authorized_credentials, get_client, parse_drive_time
+from app.integrations.google_drive import (
+    GMAIL_SCOPE, authorized_credentials, get_client, is_organization_account, parse_drive_time,
+)
 from app.models import (
     AnalysisRun, DriveFile, DuplicateGroup, GmailMessage, OptimizationAction, OrganizeSuggestion, Recommendation,
     StorageSnapshot, User,
@@ -91,7 +93,8 @@ def _quota_and_files(db: Session, user: User, progress=_no_progress) -> tuple[di
         return demo_drive.demo_quota(sum(f["size_bytes"] for f in active), trash, user.demo_variant), active
 
     client = get_client(user)
-    quota = client.storage_quota()
+    # A school/work account's quota numbers are the whole organization's.
+    quota = client.storage_quota(pooled=True) if is_organization_account(user) else client.storage_quota()
     files = []
     for n, r in enumerate(client.iter_all_files(), start=1):
         if not r.get("trashed") and r.get("mimeType") not in _CONTAINER_MIME_TYPES:
@@ -330,6 +333,8 @@ def run_analysis(db: Session, user: User, progress=_no_progress) -> AnalysisRun:
         user_id=user.id, used_bytes=quota["used_bytes"], quota_bytes=quota["quota_bytes"],
         recoverable_bytes=total_recoverable, drive_bytes=quota["drive_bytes"],
         drive_trash_bytes=quota["drive_trash_bytes"], gmail_photos_bytes=quota["gmail_photos_bytes"],
+        pooled=quota.get("pooled", False), org_used_bytes=quota.get("org_used_bytes", 0),
+        org_quota_bytes=quota.get("org_quota_bytes", 0),
     ))
     db.commit()
     return run

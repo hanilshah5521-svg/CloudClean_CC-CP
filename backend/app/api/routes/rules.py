@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.models import CompressionRule, RuleSuggestion, User
 from app.schemas import RuleIn, RuleOut, SuggestionOut
 from app.security.session import get_current_user
+from app.services.account_service import members_by_id, owner_fields
 from app.services.job_service import submit_job
 from app.services.rules_service import queue_suggestion
 
@@ -76,37 +77,43 @@ def run_rules_now(response: Response, user: User = Depends(get_current_user), db
 
 @router.get("/suggestions", response_model=list[SuggestionOut])
 def list_suggestions(status: str = "open", user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """status=open (pending + queued, the default), all, or one status."""
-    q = db.query(RuleSuggestion).filter(RuleSuggestion.user_id == user.id)
+    """status=open (pending + queued, the default), all, or one status. Covers
+    every linked account; each account's own rules made its suggestions."""
+    members = members_by_id(db, user)
+    q = db.query(RuleSuggestion).filter(RuleSuggestion.user_id.in_(list(members)))
     if status == "open":
         q = q.filter(RuleSuggestion.status.in_(("pending", "queued")))
     elif status != "all":
         q = q.filter(RuleSuggestion.status == status)
-    return q.order_by(RuleSuggestion.estimated_saving_bytes.desc()).limit(200).all()
+    rows = q.order_by(RuleSuggestion.estimated_saving_bytes.desc()).limit(200).all()
+    return [{**SuggestionOut.model_validate(s).model_dump(), **owner_fields(members[s.user_id])} for s in rows]
 
 
-def _suggestion(db: Session, user: User, suggestion_id: int) -> RuleSuggestion:
-    s = db.query(RuleSuggestion).filter(RuleSuggestion.id == suggestion_id, RuleSuggestion.user_id == user.id).first()
+def _suggestion(db: Session, user: User, suggestion_id: int) -> tuple[RuleSuggestion, User]:
+    """A suggestion in any linked account, and the account it belongs to."""
+    members = members_by_id(db, user)
+    s = db.query(RuleSuggestion).filter(
+        RuleSuggestion.id == suggestion_id, RuleSuggestion.user_id.in_(list(members))).first()
     if not s:
         raise HTTPException(status_code=404, detail="Suggestion not found.")
-    return s
+    return s, members[s.user_id]
 
 
 @router.post("/suggestions/{suggestion_id}/apply")
 def apply_suggestion(suggestion_id: int, response: Response, user: User = Depends(get_current_user),
                      db: Session = Depends(get_db)):
-    suggestion = _suggestion(db, user, suggestion_id)
+    suggestion, owner = _suggestion(db, user, suggestion_id)
     if suggestion.status not in ("pending", "failed", "skipped"):
         raise HTTPException(status_code=400, detail=f"This suggestion is already {suggestion.status}.")
-    job = queue_suggestion(db, user, suggestion)
+    job = queue_suggestion(db, owner, suggestion)  # runs in the account that owns the file
     if job.status not in ("done", "failed"):
         response.status_code = 202
-    return job_out(db, job, user)
+    return {**job_out(db, job, owner), **owner_fields(owner)}
 
 
 @router.post("/suggestions/{suggestion_id}/dismiss", response_model=SuggestionOut)
 def dismiss_suggestion(suggestion_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    suggestion = _suggestion(db, user, suggestion_id)
+    suggestion, owner = _suggestion(db, user, suggestion_id)
     if suggestion.status == "queued":
         raise HTTPException(status_code=400, detail="This file is already being compressed.")
     suggestion.status = "dismissed"

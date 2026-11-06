@@ -42,9 +42,11 @@ Click **Try Demo Mode** on the start page, then work through these. Each line sa
 | 7 | History | **Undo** a compression, **Restore** a trashed file | Status changes to *reverted*; the file is back |
 | 7a | History | On a compressed file, **Free space now** | Confirms first; deletes the kept original and frees its space (Undo is no longer possible after) |
 | 8 | Profile menu (top right) | **Add a simulated account** twice | Three accounts listed; a fourth can't be added. **Run Scan** now scans all three |
-| 9 | Accounts | Look at the storage per account and **Copies across accounts**; filter by one account | Each group holds the same file in two or more accounts; the suggested copy to keep is in the account with the most free space |
-| 10 | Accounts | **Remove** the other copies of one group | Confirms first; the group disappears. Switch to the account that held a copy (profile menu) — its History shows the removal, and **Restore** works |
-| 11 | Profile menu | Switch accounts | Every page shows that account's data; the Dashboard says which account you're viewing |
+| 9 | Accounts | Look at the storage per account | Used and free space per account and in total, plus **Saved by CloudClean** across all accounts. No copies list here — those are in Duplicates |
+| 10 | Duplicates | Find a group marked **Identical copies in several accounts** and **Remove** the other copies | Confirms first; the group disappears. History (filtered to the account that held a copy) shows the removal, and **Restore** works from here |
+| 11 | Profile menu | Switch accounts | Dashboard and Settings show that account; the Dashboard says which account you're viewing |
+| 11a | Duplicates / Organize / Compression / History / Analytics | Look at the **Account** column or badges, then filter by one account | Findings from all linked accounts; groups can hold copies from two or three accounts. Acting on another account's file says it's recorded in *that* account's History |
+| 11b | Analytics | After compressing or trashing something, look at **Saved by CloudClean**; restart CloudClean and look again | The totals (per action type and per account) are the same after the restart. Undoing an action in History removes it from the total |
 | 12 | Accounts / Settings → Account | Remove a linked account | Confirms first; you can't remove the account you're working in |
 | 13 | Duplicates / Compression | Look for **Open in Drive** links | Disabled in Demo Mode, with a note why (the files only exist in a real Drive) |
 | 14 | Profile menu | Change the theme to **Dark**, then **System** | The whole app, including charts, switches theme; the choice survives a reload |

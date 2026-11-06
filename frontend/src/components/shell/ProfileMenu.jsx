@@ -83,7 +83,8 @@ export default function ProfileMenu() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] text-ink">{a.email}</span>
                       <span className="block text-[11px] text-faint">
-                        {a.quota_bytes ? `${formatBytes(a.used_bytes)} of ${formatBytes(a.quota_bytes)}` : "Not scanned yet"}
+                        {a.pooled ? `${formatBytes(a.used_bytes)} · school/work storage`
+                          : a.quota_bytes ? `${formatBytes(a.used_bytes)} of ${formatBytes(a.quota_bytes)}` : "Not scanned yet"}
                         {a.active ? " · working in this one" : ""}
                       </span>
                     </span>

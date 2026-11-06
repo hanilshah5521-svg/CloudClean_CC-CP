@@ -7,6 +7,7 @@ from app.compression.video import ffmpeg_available
 from app.core.database import get_db
 from app.models import DriveFile, Job, OptimizationAction, User
 from app.security.session import get_current_user
+from app.services.account_service import members_by_id, owner_fields
 from app.services.job_service import ACTIVE_STATUSES, submit_job
 from app.services.optimization_service import OptimizationError, compress_file
 
@@ -22,9 +23,10 @@ def _estimate(f: DriveFile):
                                 width=f.video_width or 0, height=f.video_height or 0)
 
 
-def _candidates(db: Session, user: User, video: bool):
+def _candidates(db: Session, members: dict[int, User], video: bool):
+    """Candidates in every linked account (an action on one runs in its own account)."""
     q = db.query(DriveFile).filter(
-        DriveFile.user_id == user.id, DriveFile.is_trashed.is_(False),
+        DriveFile.user_id.in_(list(members)), DriveFile.is_trashed.is_(False),
         DriveFile.recommendation_type == "compress",
     )
     q = q.filter(DriveFile.category == "video") if video else q.filter(DriveFile.category != "video")
@@ -35,10 +37,12 @@ def _candidates(db: Session, user: User, video: bool):
 def compression_candidates(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Images and PDFs, compressed inside the request. Videos are separate
     (see /compression/video-candidates): they're re-encoded in the background."""
+    members = members_by_id(db, user)
     out = []
-    for f in _candidates(db, user, video=False):
+    for f in _candidates(db, members, video=False):
         est = _estimate(f)
         out.append({
+            **owner_fields(members[f.user_id]),
             "file_id": f.id, "drive_id": f.drive_id, "name": f.name, "current_size_bytes": f.size_bytes,
             "web_url": f.web_url, "parent_id": f.parent_id,
             "file_type": f.extension or f.category,
@@ -53,16 +57,19 @@ def compression_candidates(user: User = Depends(get_current_user), db: Session =
 
 @router.get("/compression/video-candidates")
 def video_candidates(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    rows = _candidates(db, user, video=True)
+    members = members_by_id(db, user)
+    rows = _candidates(db, members, video=True)
     active = {
-        j.target: j for j in db.query(Job).filter(
-            Job.user_id == user.id, Job.kind == "compress_video", Job.status.in_(ACTIVE_STATUSES))
+        (j.user_id, j.target): j for j in db.query(Job).filter(
+            Job.user_id.in_(list(members)), Job.kind == "compress_video", Job.status.in_(ACTIVE_STATUSES))
     }
     out = []
     for f in rows:
         est = _estimate(f)
-        job = active.get(f.drive_id)
+        owner = members[f.user_id]
+        job = active.get((f.user_id, f.drive_id))
         out.append({
+            **owner_fields(owner),
             "file_id": f.id, "drive_id": f.drive_id, "name": f.name, "current_size_bytes": f.size_bytes,
             "web_url": f.web_url, "parent_id": f.parent_id,
             "file_type": f.extension or f.category,
@@ -71,21 +78,22 @@ def video_candidates(user: User = Depends(get_current_user), db: Session = Depen
             "confidence": est.confidence, "confidence_label": _confidence_label(est.confidence),
             "duration_s": est.details.get("duration_s"), "width": f.video_width, "height": f.video_height,
             "current_kbps": est.details.get("current_kbps"), "target_kbps": est.details.get("target_kbps"),
-            "job": job_out(db, job, user) if job else None,
+            "job": job_out(db, job, owner) if job else None,
         })
-    return {"candidates": out, "not_suggested": _videos_not_suggested(db, user),
+    return {"candidates": out, "not_suggested": _videos_not_suggested(db, members),
             "ffmpeg_available": user.is_demo or ffmpeg_available()}
 
 
-def _videos_not_suggested(db: Session, user: User) -> list[dict]:
+def _videos_not_suggested(db: Session, members: dict[int, User]) -> list[dict]:
     """Every other video, with the reason it isn't a candidate — so a video
     the user expected to see is never silently missing."""
     rows = db.query(DriveFile).filter(
-        DriveFile.user_id == user.id, DriveFile.is_trashed.is_(False), DriveFile.category == "video",
+        DriveFile.user_id.in_(list(members)), DriveFile.is_trashed.is_(False), DriveFile.category == "video",
         DriveFile.recommendation_type != "compress",
     ).order_by(DriveFile.size_bytes.desc()).all()
     out = []
     for f in rows:
+        user = members[f.user_id]  # each account's own History and minimum-saving setting
         est = _estimate(f)
         if f.recommendation_type == "already_optimized":
             last = (db.query(OptimizationAction).filter(
@@ -101,17 +109,25 @@ def _videos_not_suggested(db: Session, user: User) -> list[dict]:
             reason = (f"Estimated saving ({est.estimated_ratio:.0%}) is below your "
                       f"{user.settings.min_saving_percent:g}% minimum (Settings).")
         out.append({"file_id": f.id, "drive_id": f.drive_id, "name": f.name, "size_bytes": f.size_bytes,
-                    "web_url": f.web_url, "parent_id": f.parent_id, "reason": reason})
+                    "web_url": f.web_url, "parent_id": f.parent_id, "reason": reason, **owner_fields(user)})
     return out
+
+
+def _owned_file(db: Session, user: User, file_id: int, *conditions) -> tuple[DriveFile, User]:
+    """A file in any linked account, and the account that owns it."""
+    members = members_by_id(db, user)
+    file_row = db.query(DriveFile).filter(
+        DriveFile.id == file_id, DriveFile.user_id.in_(list(members)), *conditions).first()
+    if not file_row:
+        raise HTTPException(status_code=404, detail="File not found.")
+    return file_row, members[file_row.user_id]
 
 
 @router.post("/compression/{file_id}")
 def compress(file_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    file_row = db.query(DriveFile).filter(DriveFile.id == file_id, DriveFile.user_id == user.id).first()
-    if not file_row:
-        raise HTTPException(status_code=404, detail="File not found.")
+    file_row, owner = _owned_file(db, user, file_id)
     try:
-        return compress_file(db, user, file_row)
+        return {**compress_file(db, owner, file_row), **owner_fields(owner)}
     except OptimizationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -122,14 +138,12 @@ def compress_video(file_id: int, response: Response, user: User = Depends(get_cu
     """Queue a "compress_video" job (or return the one already running for
     this file). Poll GET /api/jobs/{id}; the result has the same fields as
     POST /compression/{file_id}."""
-    file_row = db.query(DriveFile).filter(
-        DriveFile.id == file_id, DriveFile.user_id == user.id, DriveFile.is_trashed.is_(False)).first()
-    if not file_row:
-        raise HTTPException(status_code=404, detail="File not found.")
+    file_row, owner = _owned_file(db, user, file_id, DriveFile.is_trashed.is_(False))
     if file_row.category != "video" or file_row.extension.lower() not in REENCODABLE_VIDEO_EXT:
         raise HTTPException(status_code=400, detail="Only MP4, MOV and MKV videos can be re-encoded.")
-    job = submit_job(db, user, "compress_video", {"drive_id": file_row.drive_id, "file_name": file_row.name},
+    # The job runs in the account that owns the video, with its permission.
+    job = submit_job(db, owner, "compress_video", {"drive_id": file_row.drive_id, "file_name": file_row.name},
                      target=file_row.drive_id)
     if job.status not in ("done", "failed"):
         response.status_code = 202
-    return job_out(db, job, user)
+    return {**job_out(db, job, owner), **owner_fields(owner)}

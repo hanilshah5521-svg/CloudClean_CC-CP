@@ -46,7 +46,6 @@ export const api = {
   googleLinkUrl: `${BASE_URL}/auth/google/link`,
   scanAllAccounts: () => request("/api/accounts/scan", { method: "POST" }),
   activeAccountScans: () => request("/api/accounts/scan"),
-  getCrossDuplicates: (accountId) => request(`/api/accounts/duplicates${accountId ? `?account_id=${accountId}` : ""}`),
   removeCrossCopies: (keepFileId, removeFileIds) =>
     request("/api/accounts/duplicates/remove", {
       method: "POST",
@@ -72,8 +71,10 @@ export const api = {
   getRecommendations: () => request("/api/recommendations"),
 
   // Analytics
-  getBreakdown: () => request("/api/analytics/breakdown"),
-  getStorageHistory: (range = "30d") => request(`/api/analytics/history?range=${range}`),
+  // accountId: one linked account; omitted = every linked account
+  getBreakdown: (accountId) => request(`/api/analytics/breakdown${accountId ? `?account_id=${accountId}` : ""}`),
+  getStorageHistory: (range = "30d", accountId) =>
+    request(`/api/analytics/history?range=${range}${accountId ? `&account_id=${accountId}` : ""}`),
 
   // Duplicates
   getDuplicates: () => request("/api/duplicates"),
@@ -114,7 +115,13 @@ export const api = {
   dismissOrganize: (id) => request(`/api/organize/${id}/dismiss`, { method: "POST" }),
 
   // History
-  getHistory: () => request("/api/history"),
+  // Every linked account's actions, or just accountId's
+  getHistory: ({ accountId, limit } = {}) => {
+    const qs = new URLSearchParams({ ...(accountId ? { account_id: accountId } : {}), ...(limit ? { limit } : {}) }).toString();
+    return request(`/api/history${qs ? `?${qs}` : ""}`);
+  },
+  // All-time totals (space saved per action / account / day), kept across restarts
+  getHistorySummary: (accountId) => request(`/api/history/summary${accountId ? `?account_id=${accountId}` : ""}`),
   // Undoing a large/video compression returns { job_id, job } — poll it.
   restoreAction: (actionId) => request(`/api/history/${actionId}/restore`, { method: "POST" }),
   // Permanently delete a compressed file's kept original version (no Undo after).

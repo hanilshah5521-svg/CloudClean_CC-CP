@@ -185,23 +185,46 @@ CloudClean links them into one **profile**:
   you keep working in the current one. Signing in later with *any* linked account opens the same
   profile. In Demo Mode the same button adds a **simulated account** (a "college" and a "personal"
   Drive holding copies of some of the main account's files), up to three accounts in all.
-- **Switching:** the profile menu lists every linked account; picking one switches the whole app —
-  Dashboard, Duplicates, Compression, History — to that account's data. Each account keeps its own
-  scan, settings and History.
+- **Switching:** the profile menu lists every linked account; picking one switches the Dashboard
+  and Settings to that account. Each account keeps its own scan, settings and History.
+- **Findings across all accounts:** **Duplicates**, **Organize**, **Compression**, **History** and
+  **Analytics** cover every linked account, each item labelled with its account (with a filter per
+  account), so nothing is hidden just because you're working in another one. Duplicates groups
+  copies of one file however many accounts hold it (two, three or more copies), including files
+  copied between accounts. An action on a file runs in the account that owns it, with that account's
+  own Google permission, and is recorded in that account's History; Undo from History runs there too.
+- **Saved by CloudClean:** Analytics (and the Accounts page) total the space saved by every
+  compression, trash and archive still in effect, per account and over time. The totals are computed
+  from History, which lives in the database — they stay after restarts and new scans.
+- **School/work accounts:** for a Google Workspace account (e.g. `you@college.edu`), Google reports
+  the *whole organization's* shared storage (a university's ~100 TB) instead of yours. CloudClean
+  counts only what your own Drive uses there, shows it without a personal limit, and keeps it out of
+  the "free across accounts" total (it suggests keeping copies in personal accounts, since school
+  accounts usually close when you leave).
 - **Scanning:** **Run Scan** scans every linked account (one background job each) and the progress
   bar shows them together.
 - **Accounts page:** used and free space per account and across all of them (free space isn't
-  poolable — each account is still capped at its own 15 GB), plus **copies across accounts**: files
-  with the same content checksum and size stored in two or more accounts, filterable by account.
-  CloudClean suggests keeping the copy in the account with the most free space; you can pick another,
-  and removing the others moves them to *their own account's* Trash, recorded in that account's
-  History, where Restore works as usual.
+  poolable — each account is still capped at its own 15 GB). Files copied across accounts (same
+  content checksum and size in two or more accounts) are on the **Duplicates** page: CloudClean
+  suggests keeping the copy in the account with the most free space; you can pick another, and
+  removing the others moves them to *their own account's* Trash, recorded in that account's History,
+  where Restore works as usual.
 - **Removing an account** from the profile (Accounts page or Settings → Account) only unlinks it and
   deletes CloudClean's cached data for it — nothing in that Google account is touched. You can't
   remove the account you're currently working in; switch away first.
 
 Links into Drive carry `?authuser=<email>`, so a file in a linked account opens in that account
 even when the browser's default Google account is a different one.
+
+### What is kept, and where
+
+Everything CloudClean records — History (every compression, trash, archive and organize, with what
+Undo needs), scan results, storage snapshots, settings and rules — is in the SQLite database
+`backend/data/cloudclean.db`. It survives restarts: signing in again with a Google account finds its
+earlier data by that account's Google ID. A **Run Scan** rebuilds the file list but never touches
+History. The only things that delete data are removing an account from the profile, deleting the
+database file, and **Demo Mode**: every *Try Demo Mode* click starts a new, empty demo profile, and
+demo profiles are deleted after 24 hours.
 
 ## Running with Docker
 

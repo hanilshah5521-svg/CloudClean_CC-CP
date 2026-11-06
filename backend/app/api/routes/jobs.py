@@ -14,6 +14,8 @@ def job_out(db: Session, job: Job, user: User) -> dict:
     out = JobOut.model_validate(job).model_dump(mode="json")
     # Demo jobs never need the worker (they run inline).
     out["worker_online"] = user.is_demo or job.status not in ACTIVE_STATUSES or worker_online(db)
+    if user.id == job.user_id:  # the linked account the job runs in (and records History for)
+        out["account_id"], out["account_email"] = user.id, user.email
     return out
 
 
@@ -31,10 +33,15 @@ def get_job(job_id: int, user: User = Depends(get_current_user), db: Session = D
 
 @router.get("/jobs")
 def list_jobs(active: bool = False, kind: str = "", limit: int = Query(20, ge=1, le=100),
-              user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    q = db.query(Job).filter(Job.user_id == user.id)
+              all_accounts: bool = False, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """This account's jobs, or (all_accounts) every linked account's — History
+    covers them all, so an Undo running in another account shows its progress."""
+    from app.services.account_service import members_by_id
+
+    owners = members_by_id(db, user) if all_accounts else {user.id: user}
+    q = db.query(Job).filter(Job.user_id.in_(list(owners)))
     if active:
         q = q.filter(Job.status.in_(ACTIVE_STATUSES))
     if kind:
         q = q.filter(Job.kind == kind)
-    return [job_out(db, j, user) for j in q.order_by(Job.id.desc()).limit(limit)]
+    return [job_out(db, j, owners[j.user_id]) for j in q.order_by(Job.id.desc()).limit(limit)]

@@ -13,6 +13,7 @@ import { useToast } from "../hooks/useToast.jsx";
 import { DriveTrashNotice } from "../components/GoogleLinks.jsx";
 import { driveLinkActions } from "../components/details.js";
 import { useGoogleLinks } from "../hooks/useGoogleLinks.js";
+import { useUser } from "../hooks/useUser.jsx";
 import { formatBytes, formatDate } from "../utils/format.js";
 
 export const REC_TYPE = {
@@ -40,17 +41,18 @@ export default function Dashboard() {
   const links = useGoogleLinks();
   const toast = useToast();
   const { multiple, accounts, active, summary } = useAccounts();
+  const { user } = useUser(); // the account being worked in (switching reloads the app)
   const [data, setData] = useState(null);
   const [archiving, setArchiving] = useState(null); // files awaiting the archive confirmation
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const [storage, analysis, recs, history] = await Promise.all([
-      api.getStorage(), api.getAnalysis(), api.getRecommendations(), api.getHistory(),
+      api.getStorage(), api.getAnalysis(), api.getRecommendations(), api.getHistory({ accountId: user?.id, limit: 6 }),
     ]);
     // Gmail recommendations from earlier scans are hidden: CloudClean now works on Drive only.
     setData({ storage, analysis, recs: recs.filter((r) => r.type !== "gmail"), history: history.slice(0, 6) });
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     load().catch(() => setData({ error: true }));
@@ -167,27 +169,42 @@ export default function Dashboard() {
           <span>
             Showing <span className="font-medium text-ink">{active?.email}</span>. Across your{" "}
             <span className="mono text-ink">{accounts.length}</span> linked accounts:{" "}
-            <span className="mono text-ink">{formatBytes(summary.combined.used_bytes)}</span> of{" "}
-            <span className="mono text-ink">{formatBytes(summary.combined.quota_bytes)}</span> used.
+            <span className="mono text-ink">{formatBytes(summary.combined.used_bytes)}</span> used
+            {summary.combined.pooled_accounts
+              ? <> ({formatBytes(summary.combined.quota_bytes)} of personal quota, plus school/work storage).</>
+              : <> of <span className="mono text-ink">{formatBytes(summary.combined.quota_bytes)}</span>.</>}
           </span>
           <Link to="/accounts" className="font-medium text-accent-ink hover:underline">All accounts &amp; shared duplicates →</Link>
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Used" value={formatBytes(storage.used_bytes)} sub={`of ${formatBytes(storage.quota_bytes)} · ${storage.used_percent}%`} tone={storage.used_percent >= 90 ? "bad" : undefined} />
+        <Stat label="Used" value={formatBytes(storage.used_bytes)}
+              sub={storage.pooled ? "in your Drive · school/work storage" : `of ${formatBytes(storage.quota_bytes)} · ${storage.used_percent}%`}
+              tone={storage.used_percent >= 90 ? "bad" : undefined} />
         <Stat label="Potentially recoverable" value={`+${formatBytes(storage.recoverable_bytes)}`} sub="counted once per file" tone="ok" />
-        <Stat label="After optimization" value={formatBytes(storage.projected_used_bytes)} sub={`${storage.projected_used_percent}% · once Trash is emptied`} />
+        <Stat label="After optimization" value={formatBytes(storage.projected_used_bytes)}
+              sub={storage.pooled ? "once Trash is emptied" : `${storage.projected_used_percent}% · once Trash is emptied`} />
         <Stat label="Recommendations" value={recs.length} sub={`${analysis.duplicates_found} duplicate files found`} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
-        <Card title="Shared storage quota" subtitle="Google reports Drive and its Trash separately; Gmail and Photos only as one number.">
-          <SegmentedBar segments={segments} total={storage.quota_bytes} marker={storage.projected_used_bytes} height="h-3" />
+        <Card
+          title={storage.pooled ? "Your Drive in shared school/work storage" : "Shared storage quota"}
+          subtitle={storage.pooled
+            ? "This account's storage is pooled across its organization, so Google reports no personal limit — only what your own Drive uses."
+            : "Google reports Drive and its Trash separately; Gmail and Photos only as one number."}
+        >
+          <SegmentedBar segments={segments} total={storage.pooled ? storage.used_bytes : storage.quota_bytes}
+                        marker={storage.projected_used_bytes} height="h-3" />
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <Legend items={segments} />
             <span className="text-[12px] text-sub">
-              Free{" "}<span className="mono text-ink">{formatBytes(storage.remaining_bytes)}</span>
+              {storage.pooled ? (
+                storage.org_quota_bytes ? <>Whole organization: <span className="mono text-ink">{formatBytes(storage.org_used_bytes)}</span> of <span className="mono text-ink">{formatBytes(storage.org_quota_bytes)}</span></> : null
+              ) : (
+                <>Free{" "}<span className="mono text-ink">{formatBytes(storage.remaining_bytes)}</span></>
+              )}
             </span>
           </div>
           {storage.drive_trash_bytes > 0 && (

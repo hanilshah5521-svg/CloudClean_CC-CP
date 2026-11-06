@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import SessionLocal, get_db, init_db
+from app.integrations.google_drive import quota_from_about
 from app.main import app
 from app.models import Job, OptimizationAction, User, UserSettings
 from app.security.session import get_current_user
@@ -161,9 +162,8 @@ def test_demo_analyze_runs_inline_as_a_job():
 
 
 class ListingDrive:
-    def storage_quota(self):
-        return {"used_bytes": 300, "quota_bytes": 1000, "drive_bytes": 300, "drive_trash_bytes": 0,
-                "gmail_photos_bytes": 0}
+    def storage_quota(self, pooled=False):
+        return quota_from_about({"usage": "300", "usageInDrive": "300", "limit": "1000"}, pooled)
 
     def iter_all_files(self):
         yield {"id": "f1", "name": "a.pdf", "mimeType": "application/pdf", "size": "100", "md5Checksum": "x"}

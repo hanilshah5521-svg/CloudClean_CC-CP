@@ -134,6 +134,49 @@ def fetch_userinfo(creds: Credentials) -> dict:
     return service.userinfo().get().execute()
 
 
+CONSUMER_DOMAINS = {"gmail.com", "googlemail.com"}
+FREE_QUOTA_BYTES = 15 * 1024 ** 3
+
+
+def is_organization_account(user) -> bool:
+    """A Google Workspace (school/work) account, e.g. you@college.edu.
+
+    Google sends a hosted domain ("hd") at sign-in for these; accounts that
+    signed in before it was recorded fall back to the email's domain."""
+    if user.hosted_domain is not None:
+        return bool(user.hosted_domain)
+    domain = (user.email or "").rsplit("@", 1)[-1].lower()
+    return bool(domain) and domain not in CONSUMER_DOMAINS
+
+
+def quota_from_about(q: dict, pooled: bool = False) -> dict:
+    """Drive's about.storageQuota as CloudClean's storage numbers.
+
+    For a school/work account the organization usually shares one storage
+    pool, and Google then reports `limit` and `usage` for the WHOLE
+    organization (a college's ~100 TB), not the person. Only usageInDrive is
+    theirs, so that's what such an account counts as used, with no personal
+    limit; the organization's figures are kept separately for reference."""
+    used = int(q.get("usage") or 0)
+    drive = int(q.get("usageInDrive") or 0)
+    trash = int(q.get("usageInDriveTrash") or 0)
+    limit = int(q.get("limit") or 0)
+    if pooled:
+        return {
+            "used_bytes": drive, "quota_bytes": 0, "drive_bytes": max(0, drive - trash), "drive_trash_bytes": trash,
+            "gmail_photos_bytes": 0, "pooled": True, "org_used_bytes": used, "org_quota_bytes": limit,
+        }
+    return {
+        "used_bytes": used,
+        "quota_bytes": limit or FREE_QUOTA_BYTES,
+        # usageInDrive includes Drive's Trash; the remainder is Gmail + Photos.
+        "drive_bytes": max(0, drive - trash),
+        "drive_trash_bytes": trash,
+        "gmail_photos_bytes": max(0, used - drive),
+        "pooled": False, "org_used_bytes": 0, "org_quota_bytes": 0,
+    }
+
+
 class DriveClient:
     """Thin wrapper around the Drive v3 API used by CloudClean's services."""
 
@@ -141,19 +184,9 @@ class DriveClient:
         self._creds = creds
         self._service = build("drive", "v3", credentials=creds, cache_discovery=False)
 
-    def storage_quota(self) -> dict:
+    def storage_quota(self, pooled: bool = False) -> dict:
         about = self._service.about().get(fields="storageQuota").execute()
-        q = about.get("storageQuota", {})
-        used = int(q.get("usage", 0))
-        drive = int(q.get("usageInDrive", 0))
-        return {
-            "used_bytes": used,
-            "quota_bytes": int(q.get("limit", 0)) if q.get("limit") else 15 * 1024 ** 3,
-            # usageInDrive includes Drive's Trash; the remainder is Gmail + Photos.
-            "drive_bytes": max(0, drive - int(q.get("usageInDriveTrash", 0))),
-            "drive_trash_bytes": int(q.get("usageInDriveTrash", 0)),
-            "gmail_photos_bytes": max(0, used - drive),
-        }
+        return quota_from_about(about.get("storageQuota", {}), pooled)
 
     def list_files(self, page_token: str | None = None, page_size: int = 1000):
         """One page of the user's own non-trashed files, metadata only (no content download)."""

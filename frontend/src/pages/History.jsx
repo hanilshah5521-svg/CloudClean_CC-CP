@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, FolderOpen, History as HistoryIcon, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "../services/api.js";
+import { accountTone, useAccounts } from "../context/accounts.jsx";
 import { useScan } from "../context/scan.jsx";
 import { useDrawer } from "../context/drawer.jsx";
 import { useToast } from "../hooks/useToast.jsx";
@@ -8,7 +9,7 @@ import { isActive, useJobs } from "../hooks/useJobs.js";
 import { useGoogleLinks } from "../hooks/useGoogleLinks.js";
 import { DEMO_LINK_REASON } from "../components/details.js";
 import { Button } from "../components/ui/button.jsx";
-import { Badge, Card, EmptyState, PageHeader, SkeletonRows, Stat } from "../components/ui/primitives.jsx";
+import { Badge, Card, EmptyState, FilterPills, PageHeader, SkeletonRows, Stat } from "../components/ui/primitives.jsx";
 import { ConfirmDialog } from "../components/ui/dialog.jsx";
 import { JobStatus } from "../components/ui/progress.jsx";
 import { daysUntil, formatBytes, formatDate, formatDateTime } from "../utils/format.js";
@@ -24,16 +25,17 @@ const STATUS_TONE = { success: "ok", skipped: "neutral", failed: "bad", reverted
 function historyLinks(h, links) {
   const link = (label, icon, href) => ({ label, icon, href, disabledReason: DEMO_LINK_REASON });
   const inTrash = h.status === "success";
+  const account = h.account_email;
   switch (h.action) {
     case "compressed":
     case "archive_created":
-      return [link("Open in Drive", ExternalLink, links.fileById(h.file_drive_id))];
+      return [link("Open in Drive", ExternalLink, links.fileById(h.file_drive_id, account))];
     case "organized":
-      return [link("Open folder in Drive", FolderOpen, links.folder(h.file_drive_id))];
+      return [link("Open folder in Drive", FolderOpen, links.folder(h.file_drive_id, account))];
     case "trashed":
     case "archived":
-      if (inTrash) return [link("Open Drive Trash", Trash2, links.driveTrash)];
-      return h.status === "reverted" ? [link("Open in Drive", ExternalLink, links.fileById(h.file_drive_id))] : [];
+      if (inTrash) return [link("Open Drive Trash", Trash2, links.driveTrashOf(account))];
+      return h.status === "reverted" ? [link("Open in Drive", ExternalLink, links.fileById(h.file_drive_id, account))] : [];
     case "gmail_trashed":
       if (inTrash) return [link("Open Gmail Trash", Trash2, links.gmailTrash)];
       return h.status === "reverted" ? [link("Open in Gmail", ExternalLink, links.gmailMessageById(h.file_drive_id))] : [];
@@ -44,14 +46,23 @@ function historyLinks(h, links) {
 
 export default function History() {
   const [rows, setRows] = useState(null);
+  const [summary, setSummary] = useState(null); // all-time totals, from the whole History
+  const [filter, setFilter] = useState(""); // account id, "" = every linked account
   const [freeing, setFreeing] = useState(null);
   const [busy, setBusy] = useState(null);
   const { version } = useScan();
+  const { accounts, active, multiple } = useAccounts();
   const { open } = useDrawer();
   const toast = useToast();
   const links = useGoogleLinks();
 
-  const load = useCallback(async () => setRows(await api.getHistory()), []);
+  const load = useCallback(async () => {
+    const accountId = filter || undefined;
+    const [list, totals] = await Promise.all([api.getHistory({ accountId, limit: 500 }), api.getHistorySummary(accountId)]);
+    setRows(list);
+    setSummary(totals);
+  }, [filter]);
+  const elsewhere = (email) => (multiple && email && email !== active?.email ? ` (in ${email})` : "");
 
   // Undoing a video (or other large) compression is a background job.
   const { jobs, track } = useJobs(async (_key, job) => {
@@ -62,7 +73,7 @@ export default function History() {
 
   useEffect(() => {
     load().catch((e) => toast(e.message, "error"));
-    api.listJobs({ active: true, kind: "restore" }).then((list) => list.forEach((job) => track(job.payload.action_id, job)), () => {});
+    api.listJobs({ active: true, kind: "restore", all_accounts: true }).then((list) => list.forEach((job) => track(job.payload.action_id, job)), () => {});
   }, [load, track, version, toast]);
 
   async function restore(h) {
@@ -71,7 +82,7 @@ export default function History() {
       const res = await api.restoreAction(h.id);
       if (res.job_id) track(h.id, res.job);
       else {
-        toast(res.message || "Restored.");
+        toast(`${res.message || "Restored."}${elsewhere(res.account_email)}`);
         await load();
       }
     } catch (e) {
@@ -94,20 +105,33 @@ export default function History() {
     }
   }
 
-  if (!rows) return <Card bodyClassName="p-0"><SkeletonRows rows={10} cols={6} /></Card>;
-
-  const recovered = rows.filter((h) => h.status === "success").reduce((s, h) => s + h.saved_bytes, 0);
-  const pending = rows.filter((h) => h.can_free_space);
-  const pendingBytes = pending.reduce((s, h) => s + h.original_size_bytes, 0);
+  if (!rows || !summary) return <Card bodyClassName="p-0"><SkeletonRows rows={10} cols={6} /></Card>;
 
   return (
     <div className="space-y-4">
-      <PageHeader title="History & Restore" description="Every change CloudClean made, with what's needed to undo it." />
+      <PageHeader
+        title="History & Restore"
+        description={`Every change CloudClean made, with what's needed to undo it. Kept in CloudClean's database, so it stays after restarts and new scans.${multiple ? " Covers all your linked accounts; Undo runs in the account the change was made in." : ""}`}
+      />
+
+      {multiple && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-faint">Show actions in</span>
+          <FilterPills
+            options={[{ value: "", label: "All accounts" }, ...accounts.map((a) => ({ value: String(a.id), label: a.email.split("@")[0] }))]}
+            value={filter}
+            onChange={setFilter}
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-        <Stat label="Space recovered" value={formatBytes(recovered)} tone="ok" sub="from successful actions" />
-        <Stat label="Originals kept for Undo" value={formatBytes(pendingBytes)} tone={pending.length ? "warn" : undefined} sub={`${pending.length} file(s) — still using storage`} />
-        <Stat label="Actions" value={rows.length} className="col-span-2 lg:col-span-1" />
+        <Stat label="Space saved" value={formatBytes(summary.saved_bytes)} tone="ok"
+              sub={summary.first_action_at ? `all time, since ${formatDate(summary.first_action_at)} · undone actions excluded` : "by actions still in effect"} />
+        <Stat label="Originals kept for Undo" value={formatBytes(summary.pending_originals_bytes)} tone={summary.pending_originals ? "warn" : undefined}
+              sub={`${summary.pending_originals} file(s) — still using storage`} />
+        <Stat label="Actions" value={summary.actions} className="col-span-2 lg:col-span-1"
+              sub={summary.actions > rows.length ? `showing the latest ${rows.length}` : undefined} />
       </div>
 
       <Card bodyClassName="p-0">
@@ -118,6 +142,7 @@ export default function History() {
             <table className="w-full text-[13px]">
               <thead className="border-b border-line">
                 <tr>
+                  {multiple && <th className="th">Account</th>}
                   <th className="th">File · action</th><th className="th text-right">Before → After</th>
                   <th className="th text-right">Saved</th><th className="th">Status</th>
                   <th className="th">Original kept</th><th className="th" />
@@ -141,6 +166,7 @@ export default function History() {
                             { label: "After", value: formatBytes(h.new_size_bytes), mono: true },
                             { label: "Saved", value: formatBytes(h.saved_bytes), mono: true },
                             { label: "When", value: formatDateTime(h.created_at) },
+                            ...(multiple ? [{ label: "Account", value: h.account_email }] : []),
                             ...(h.original_delete_at ? [{ label: "Original kept until", value: formatDate(h.original_delete_at) }] : []),
                           ],
                           reason: h.detail,
@@ -148,8 +174,11 @@ export default function History() {
                         })
                       }
                     >
+                      {multiple && (
+                        <td className="td"><Badge tone={accountTone(accounts, h.account_id)}>{h.account_email.split("@")[0]}</Badge></td>
+                      )}
                       <td className="td max-w-[280px] py-2">
-                        <div className="truncate font-medium">{h.file_name}</div>
+                        <div className="truncate font-medium" title={h.file_name}>{h.file_name}</div>
                         <div className="text-[11px] text-faint">{ACTION_LABEL[h.action] || h.action} · {formatDate(h.created_at)}</div>
                       </td>
                       <td className="td mono text-right text-sub">{formatBytes(h.original_size_bytes)} → {formatBytes(h.new_size_bytes)}</td>
@@ -196,7 +225,7 @@ export default function History() {
         open={!!freeing}
         danger
         title="Delete the original version now?"
-        description={freeing ? `${freeing.file_name} — frees ${formatBytes(freeing.original_size_bytes)} immediately.` : ""}
+        description={freeing ? `${freeing.file_name}${elsewhere(freeing.account_email)} — frees ${formatBytes(freeing.original_size_bytes)} immediately.` : ""}
         consequences={[
           { kind: "permanent", text: "The original, uncompressed version is deleted from Google Drive. This compression can no longer be undone." },
           { kind: "info", text: freeing?.original_delete_at ? `Otherwise CloudClean deletes it automatically on ${formatDate(freeing.original_delete_at)}.` : "The compressed file itself stays as it is." },

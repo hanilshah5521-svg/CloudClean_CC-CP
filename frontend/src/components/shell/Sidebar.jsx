@@ -50,7 +50,7 @@ export default function Sidebar({ onNavigate }) {
       <div className="border-t border-line px-4 py-3">
         <div className="flex items-baseline justify-between text-[11px]">
           <span className="font-medium uppercase tracking-[0.04em] text-faint">Storage</span>
-          <span className="mono text-sub">{storage ? `${used.toFixed(1)}%` : "—"}</span>
+          <span className="mono text-sub">{storage && !storage.pooled ? `${used.toFixed(1)}%` : storage?.pooled ? "school/work" : "—"}</span>
         </div>
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-track">
           <div
@@ -59,7 +59,9 @@ export default function Sidebar({ onNavigate }) {
           />
         </div>
         <div className="mono mt-1 text-[11px] text-sub">
-          {storage ? `${formatBytes(storage.used_bytes)} / ${formatBytes(storage.quota_bytes)}` : "Not analyzed yet"}
+          {!storage ? "Not analyzed yet"
+            : storage.pooled ? `${formatBytes(storage.used_bytes)} in your Drive`
+            : `${formatBytes(storage.used_bytes)} / ${formatBytes(storage.quota_bytes)}`}
         </div>
       </div>
     </div>

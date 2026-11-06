@@ -37,6 +37,9 @@ class User(Base):
     token_expiry: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Space-separated scopes the user actually granted (Google lets them untick Gmail).
     granted_scopes: Mapped[str] = mapped_column(Text, default="")
+    # Google Workspace (school/work) domain from sign-in ("" = personal Google
+    # account, None = signed in before this was recorded). See is_organization_account().
+    hosted_domain: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
 
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     # Several Google accounts of one person share a profile key (empty = on
@@ -252,6 +255,13 @@ class StorageSnapshot(Base):
     drive_bytes: Mapped[int] = mapped_column(Integer, default=0)
     drive_trash_bytes: Mapped[int] = mapped_column(Integer, default=0)
     gmail_photos_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    # School/work account whose storage is shared by the whole organization:
+    # Google reports the organization's usage and limit, not this person's, so
+    # used_bytes is the person's own Drive usage and quota_bytes is 0 (no
+    # personal limit). The organization's figures are kept for reference.
+    pooled: Mapped[bool] = mapped_column(Boolean, default=False)
+    org_used_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    org_quota_bytes: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_utc, index=True)
 
 

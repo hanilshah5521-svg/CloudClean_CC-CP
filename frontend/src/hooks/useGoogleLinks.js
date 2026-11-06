@@ -32,10 +32,12 @@ export function useGoogleLinks() {
         real && f?.drive_id && !isDemoId(f.drive_id)
           ? withAccount(f.web_url || `https://drive.google.com/file/d/${f.drive_id}/view`, account || email)
           : null,
-      fileById: (driveId) => (driveId && !isDemoId(driveId) ? drive(`file/d/${driveId}/view`) : null),
+      fileById: (driveId, account) => (driveId && !isDemoId(driveId) ? drive(`file/d/${driveId}/view`, account) : null),
       /** The folder a file sits in ("Show in folder"). */
       folder: (folderId, account) => (folderId && !isDemoId(folderId) ? drive(`drive/folders/${folderId}`, account) : null),
       driveTrash: drive("drive/trash"),
+      /** Drive Trash of a linked account (the one being worked in when omitted). */
+      driveTrashOf: (account) => drive("drive/trash", account),
       gmailMessage: (url) => (real && url ? withAccount(url, email) : null),
       gmailMessageById: (id) => (real && id ? withAccount(`https://mail.google.com/mail/#all/${id}`, email) : null),
       gmailTrash: real ? withAccount("https://mail.google.com/mail/#trash", email) : null,

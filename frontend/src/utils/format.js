@@ -1,5 +1,7 @@
 export function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return "0 MB";
+  const tb = bytes / 1024 ** 4;
+  if (tb >= 1) return `${tb.toFixed(tb >= 10 ? 1 : 2)} TB`;
   const gb = bytes / 1024 ** 3;
   if (gb >= 1) return `${gb.toFixed(gb >= 10 ? 1 : 2)} GB`;
   const mb = bytes / 1024 ** 2;

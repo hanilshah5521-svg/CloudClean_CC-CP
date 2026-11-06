@@ -16,13 +16,14 @@ export const isDemoId = (id) => typeof id === "string" && id.startsWith("demo-")
 export const DEMO_LINK_REASON = "Demo Mode: this isn't in a real Google account.";
 
 /** Drawer link actions for a Drive file; `links` comes from useGoogleLinks(). */
-export function driveLinkActions(f, links) {
+// `account` (optional): the linked account that owns the file, so Google opens it signed in to that account.
+export function driveLinkActions(f, links, account) {
   return [
-    { label: "Open in Drive", icon: ExternalLink, href: links.file(f), disabledReason: DEMO_LINK_REASON },
+    { label: "Open in Drive", icon: ExternalLink, href: links.file(f, account), disabledReason: DEMO_LINK_REASON },
     {
       label: "Show in folder",
       icon: FolderOpen,
-      href: links.folder(f.parent_id),
+      href: links.folder(f.parent_id, account),
       disabledReason: links.demo ? DEMO_LINK_REASON : "Not in one of your folders (shared with you).",
     },
   ];

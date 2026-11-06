@@ -50,6 +50,11 @@ def storage_overview(db: Session, user: User) -> dict:
         "drive_bytes": snapshot.drive_bytes,
         "drive_trash_bytes": snapshot.drive_trash_bytes,
         "gmail_photos_bytes": snapshot.gmail_photos_bytes,
+        # School/work account on its organization's shared storage: used_bytes
+        # is this person's Drive, and there's no personal limit (quota 0).
+        "pooled": snapshot.pooled,
+        "org_used_bytes": snapshot.org_used_bytes,
+        "org_quota_bytes": snapshot.org_quota_bytes,
     }
 
 

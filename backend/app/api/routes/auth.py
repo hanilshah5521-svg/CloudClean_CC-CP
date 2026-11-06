@@ -109,6 +109,9 @@ def google_callback(request: Request, code: str | None = None, state: str | None
     user.granted_scopes = " ".join(granted_scopes)
     user.name = info.get("name", user.name)
     user.picture_url = info.get("picture", user.picture_url)
+    # Set only for Google Workspace (school/work) accounts, whose storage is
+    # usually the organization's shared pool.
+    user.hosted_domain = info.get("hd") or ""
     db.commit()
 
     request.session.clear()  # new session on login (no fixation)
