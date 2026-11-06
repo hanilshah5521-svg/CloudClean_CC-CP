@@ -8,6 +8,7 @@ import { useToast } from "../hooks/useToast.jsx";
 import { isActive, useJobs } from "../hooks/useJobs.js";
 import { Button } from "../components/ui/button.jsx";
 import { Badge, Card, EmptyState, FilterPills, Notice, PageHeader, SkeletonRows } from "../components/ui/primitives.jsx";
+import AutoCompressionPanel from "../components/AutoCompressionPanel.jsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/controls.jsx";
 import { JobStatus, StagePills } from "../components/ui/progress.jsx";
 import { DriveFileLinks } from "../components/GoogleLinks.jsx";
@@ -123,6 +124,8 @@ export default function Compression() {
           />
         </div>
       )}
+
+      <AutoCompressionPanel account={multiple ? active?.email : null} onChecked={load} />
 
       {completed.length > 0 && (
         <Card title="Completed this session" subtitle="Estimated before vs. measured after." bodyClassName="p-0">
@@ -302,7 +305,7 @@ export default function Compression() {
             bodyClassName="p-0"
           >
             {suggestions.length === 0 ? (
-              <EmptyState title="No rule suggestions" subtitle="Create a rule in Settings, e.g. videos over 200 MB not modified in 90 days." />
+              <EmptyState title="No rule suggestions" subtitle="Add a rule in Auto-compression above (e.g. videos over 200 MB not modified in 90 days), then press Run now or wait for tonight's check." />
             ) : (
               <ul className="divide-y divide-line">
                 {suggestions.map((s) => {

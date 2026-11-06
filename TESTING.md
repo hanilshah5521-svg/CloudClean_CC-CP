@@ -50,7 +50,8 @@ Click **Try Demo Mode** on the start page, then work through these. Each line sa
 | 12 | Accounts / Settings → Account | Remove a linked account | Confirms first; you can't remove the account you're working in |
 | 13 | Duplicates / Compression | Look for **Open in Drive** links | Disabled in Demo Mode, with a note why (the files only exist in a real Drive) |
 | 14 | Profile menu | Change the theme to **Dark**, then **System** | The whole app, including charts, switches theme; the choice survives a reload |
-| 15 | Settings | Change thresholds / add an auto-compression rule | Saved; the next **Run Scan** uses them |
+| 15 | Settings, Compression | Change thresholds in Settings; on Compression, click the **Old videos** preset in **Auto-compression**, then **Run now** | Settings are saved; the panel turns *On* and matches appear under **Rule suggestions** |
+| 15a | Analytics | Look at **What your savings are worth** | Each personal account's cheapest fitting plan now vs. without CloudClean's savings, and the money that saves per year |
 | 16 | Start page | Click **Connect Google Drive** (no keys configured) | A friendly "Google sign-in isn't set up" message — not an error page |
 
 ## 4. Testing with real accounts (optional)

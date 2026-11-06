@@ -298,10 +298,11 @@ Settings (`.env`): `VIDEO_CRF` (27), `VIDEO_PRESET` (medium), `VIDEO_THREADS` (2
 ffmpeg runs at lower priority in the separate worker process.
 
 ### Auto-compression rules
-**Settings → Auto-compression rules** lets each user define rules such as *"compress videos larger
-than 200 MB not modified in 90 days"* (also for images and PDFs). The worker evaluates every user's
+The **Auto-compression** panel at the top of the Compression page lets each user define rules such
+as *"compress videos larger than 200 MB not modified in 90 days"* (also for images and PDFs), or
+add one of three one-click presets. The worker evaluates every user's
 enabled rules once a day at `RULES_HOUR_UTC` (default 21:00 UTC = 02:30 IST), refreshing Drive
-metadata first if the last analysis is older than 20 hours; **Run rules now** does it immediately.
+metadata first if the last analysis is older than 20 hours; **Run now** does it immediately.
 Matches become **suggestions** on the Compression page (Compress / Dismiss). Only an estimated
 saving above your minimum counts as a match; dismissed files and files whose compression you undid
 are never suggested again.
@@ -348,7 +349,7 @@ above): Demo Mode connect → analyze → view score/recommendations → confirm
 a real PDF compression → verify the byte counts in History → browse Analytics → archive inactive
 files from the Dashboard recommendation; for multiple accounts: add two simulated accounts, scan all,
 remove a cross-account copy and find it in the owning account's History; and, for background jobs: analyze from the Dashboard, compress a video
-from the Compression page, add a rule in Settings (auto-apply asks for confirmation), run it, apply
+from the Compression page, add a rule in the Compression page's Auto-compression panel (auto-apply asks for confirmation), run it, apply
 one of its suggestions and Undo the compression from History.
 
 ## How it works
@@ -402,7 +403,7 @@ The Optimization Score (0–100) is a fully transparent deduction from 100: each
 weighted by documented constants in `app/recommendations/engine.py` — there is no model inference
 step. Each file's bytes count toward at most one saving (duplicate removal, then compression, then
 archiving), so "potentially recoverable" never double counts. Archive estimates are per file type:
-JPEG, video, audio and existing archives are excluded because zipping them saves next to nothing. Pricing shown in the Savings Calculator comes from `backend/data/storage_plans.json`
+JPEG, video, audio and existing archives are excluded because zipping them saves next to nothing. Pricing used by Analytics → **What your savings are worth** (the cheapest plan that fits each personal account now vs. without CloudClean's savings, and the yearly difference) comes from `backend/data/storage_plans.json`
 (editable without a code change) and is always labeled an **"effective equivalent cost"**
 (`plan price ÷ additional included GB`) — never presented as Google's actual per-GB billing rate,
 which doesn't exist.

@@ -122,9 +122,14 @@ export default function Duplicates() {
 
       {multiple && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[12px] text-faint">Show duplicates involving</span>
+          <span className="text-[12px] text-faint" title="Pick an account to see only the groups that have at least one copy in it">
+            Only show groups with a copy in
+          </span>
           <FilterPills
-            options={[{ value: "", label: "All accounts" }, ...accounts.map((a) => ({ value: String(a.id), label: short(a.email) }))]}
+            options={[{ value: "", label: `All accounts (${groups.length})` }, ...accounts.map((a) => ({
+              value: String(a.id),
+              label: `${short(a.email)} (${groups.filter((g) => g.files.some((f) => f.account_id === a.id)).length})`,
+            }))]}
             value={filter}
             onChange={setFilter}
           />

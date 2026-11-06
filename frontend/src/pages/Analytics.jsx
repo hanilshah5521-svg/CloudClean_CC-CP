@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ChartColumn, PiggyBank } from "lucide-react";
+import { ChartColumn, IndianRupee, PiggyBank } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../services/api.js";
 import { accountTone, useAccounts } from "../context/accounts.jsx";
@@ -45,15 +45,17 @@ export default function Analytics() {
 
   useEffect(() => {
     const accountId = filter || undefined;
-    Promise.all([api.getBreakdown(accountId), api.getStorageHistory(range, accountId), api.getHistorySummary(accountId)]).then(
-      ([breakdown, history, saved]) => setData({ breakdown, history, saved }),
+    Promise.all([
+      api.getBreakdown(accountId), api.getStorageHistory(range, accountId), api.getHistorySummary(accountId), api.getPlanImpact(accountId),
+    ]).then(
+      ([breakdown, history, saved, worth]) => setData({ breakdown, history, saved, worth }),
       () => setData({ error: true }),
     );
   }, [range, filter, version]);
 
   if (!data) return <Card bodyClassName="p-0"><SkeletonRows rows={8} /></Card>;
   if (data.error) return <Card><EmptyState icon={ChartColumn} title="Analytics unavailable" subtitle="Run a scan first." /></Card>;
-  const { breakdown, history, saved } = data;
+  const { breakdown, history, saved, worth } = data;
   const savedBy = (actions) => actions.reduce((n, a) => n + (saved.by_action[a]?.saved_bytes || 0), 0);
   const countBy = (actions) => actions.reduce((n, a) => n + (saved.by_action[a]?.count || 0), 0);
   const savedTrend = saved.timeline.map((p) => ({ date: formatDate(p.date), Saved: p.cumulative_bytes / GB }));
@@ -131,6 +133,8 @@ export default function Analytics() {
         )}
       </Card>
 
+      <WorthCard worth={worth} accounts={accounts} multiple={multiple} />
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Duplicate copies" value={formatBytes(breakdown.duplicate_storage_bytes)} />
         <Stat label="Est. compressible" value={formatBytes(breakdown.compressible_storage_bytes)} />
@@ -200,5 +204,65 @@ export default function Analytics() {
         </ResponsiveContainer>
       </Card>
     </div>
+  );
+}
+
+const money = (amount, currency) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
+const planLabel = (p, currency) => (p.price_monthly ? `${p.name} · ${money(p.price_monthly, currency)}/mo` : `${p.name} ${p.storage_gb} GB`);
+
+/** CloudClean's savings in money: the storage plan each personal account needs now vs. without them. */
+function WorthCard({ worth, accounts, multiple }) {
+  const { currency } = worth;
+  if (!worth.accounts.length) return null; // nothing scanned yet, or only school/work accounts
+  const paying = worth.accounts.filter((a) => a.monthly_saving > 0);
+  return (
+    <Card
+      title="What your savings are worth"
+      subtitle="The cheapest Google One plan that fits each account today, versus the one it would need without the space CloudClean saved."
+    >
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,240px)_1fr]">
+        <div className={`rounded-lg border px-4 py-4 ${paying.length ? "border-ok/40 bg-ok-soft/60" : "border-line bg-canvas"}`}>
+          <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.04em] text-faint">
+            <IndianRupee className="h-3.5 w-3.5" /> Kept in your pocket
+          </div>
+          <div className={`mono mt-1 text-[28px] font-medium leading-tight ${paying.length ? "text-ok-ink" : "text-ink"}`}>
+            {money(worth.yearly_saving, currency)}<span className="text-[14px] text-sub"> / year</span>
+          </div>
+          <p className="mt-1 text-[12px] text-sub">
+            {paying.length
+              ? `${money(worth.monthly_saving, currency)}/mo of upgrades you don't need, because the saved space keeps ${paying.length === 1 ? "an account" : `${paying.length} accounts`} on a cheaper plan.`
+              : "No plan change yet — every account fits the same plan either way. The headroom on the right is what stands between you and paying more."}
+          </p>
+        </div>
+        <ul className="divide-y divide-line rounded border border-line">
+          {worth.accounts.map((a) => (
+            <li key={a.account_id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-3 py-2.5 text-[13px]">
+              <span className="flex min-w-0 flex-col">
+                <span className="flex items-center gap-2">
+                  {multiple && <Badge tone={accountTone(accounts, a.account_id)}>{a.account_email.split("@")[0]}</Badge>}
+                  <span className="text-ink">Fits <span className="font-medium">{planLabel(a.plan_now, currency)}</span></span>
+                </span>
+                <span className="mt-0.5 text-[12px] text-sub">
+                  {a.monthly_saving > 0
+                    ? <>Without CloudClean: <span className="text-ink">{planLabel(a.plan_without_savings, currency)}</span></>
+                    : a.next_plan
+                      ? <><span className="mono">{formatBytes(a.headroom_bytes)}</span> left before you&apos;d need {planLabel(a.next_plan, currency)}</>
+                      : "On the largest plan listed"}
+                </span>
+              </span>
+              <span className="mono text-[12px] text-sub">
+                {formatBytes(a.used_bytes)} used · <span className="text-ok-ink">{formatBytes(a.saved_bytes)} saved</span>
+                {a.monthly_saving > 0 && <> · <span className="text-ok-ink">{money(a.monthly_saving, currency)}/mo</span></>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <p className="mt-3 text-[11px] text-faint">
+        {worth.region === "IN" ? "India prices. " : ""}{worth.disclaimer}
+        {worth.pooled_accounts ? ` School/work accounts aren't included: their storage is the organization's, not bought per person.` : ""}
+      </p>
+    </Card>
   );
 }

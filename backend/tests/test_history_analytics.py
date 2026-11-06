@@ -89,3 +89,22 @@ def test_analytics_cover_all_accounts_or_one(profile):
     one = client.get("/api/analytics/history", params={"range": "all", "account_id": active_id}).json()
     assert history["points"][-1]["used_bytes"] >= one["points"][-1]["used_bytes"] > 0
     assert client.get("/api/analytics/breakdown", params={"account_id": 10 ** 9}).status_code == 404
+
+
+def test_plan_impact_prices_the_space_saved(profile):
+    client, active_id, other = profile
+    worth = client.get("/api/analytics/plan-impact").json()
+    assert worth["currency"] and {a["account_id"] for a in worth["accounts"]} == {active_id, other}
+    for a in worth["accounts"]:
+        assert a["plan_now"]["storage_gb"] * 1024 ** 3 >= a["used_bytes"]
+        assert a["plan_without_savings"]["storage_gb"] >= a["plan_now"]["storage_gb"]
+    assert worth["yearly_saving"] == 12 * worth["monthly_saving"] == 12 * sum(a["monthly_saving"] for a in worth["accounts"])
+
+    # Saving enough to drop below the free tier is worth the next plan's price.
+    from app.api.routes.analytics import _cheapest_plan
+    from app.services.storage_service import load_storage_plans
+
+    plans = load_storage_plans()["plans"]
+    free = _cheapest_plan(plans, 14 * 1024 ** 3)
+    assert free["price_monthly"] == 0
+    assert _cheapest_plan(plans, 20 * 1024 ** 3)["price_monthly"] > 0

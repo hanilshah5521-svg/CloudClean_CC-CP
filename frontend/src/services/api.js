@@ -54,7 +54,6 @@ export const api = {
 
   // Storage
   getStorage: () => request("/api/storage"),
-  getSavings: () => request("/api/savings"),
 
   // Analysis — returns a background job (Demo Mode: already finished)
   analyze: () => request("/api/analyze", { method: "POST" }),
@@ -73,6 +72,8 @@ export const api = {
   // Analytics
   // accountId: one linked account; omitted = every linked account
   getBreakdown: (accountId) => request(`/api/analytics/breakdown${accountId ? `?account_id=${accountId}` : ""}`),
+  // Cheapest storage plan per account now vs. without CloudClean's savings
+  getPlanImpact: (accountId) => request(`/api/analytics/plan-impact${accountId ? `?account_id=${accountId}` : ""}`),
   getStorageHistory: (range = "30d", accountId) =>
     request(`/api/analytics/history?range=${range}${accountId ? `&account_id=${accountId}` : ""}`),
 
