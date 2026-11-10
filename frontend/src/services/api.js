@@ -1,4 +1,7 @@
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+// Development (npm run dev): the API on :8000. A production build (npm run
+// build) is served by the API itself, so it calls its own address. VITE_API_URL
+// overrides both.
+const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "");
 
 class ApiError extends Error {
   constructor(status, detail) {

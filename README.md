@@ -24,7 +24,7 @@ enough) if you connect a real Drive. **Demo Mode needs neither.**
 - [Quick start (Demo Mode)](#quick-start-demo-mode)
 - [Connecting a real Google Drive](#connecting-a-real-google-drive)
 - [Multiple Google accounts](#multiple-google-accounts)
-- [Running with Docker](#running-with-docker)
+- [Running with Docker](#running-with-docker) · [Free deployment](DEPLOY.md)
 - [Background worker, video compression & rules](#background-worker-video-compression--rules)
 - [Testing](#testing)
 - [How it works](#how-it-works)
@@ -227,6 +227,10 @@ database file, and **Demo Mode**: every *Try Demo Mode* click starts a new, empt
 demo profiles are deleted after 24 hours.
 
 ## Running with Docker
+
+To put CloudClean online for free (your PC with a free HTTPS tunnel, a Hugging Face Space, or an
+Oracle free VM), see **[DEPLOY.md](DEPLOY.md)**: the root `Dockerfile` runs the web app, API and
+worker on one address. The setup below is for local development.
 
 ```bash
 cp .env.example .env   # fill in Google credentials, or leave blank for Demo Mode only

@@ -3,6 +3,7 @@ import secrets
 from functools import cached_property
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -34,6 +35,15 @@ class Settings(BaseSettings):
 
     frontend_url: str = "http://localhost:5173"
 
+    # Deployment on one address (docker/app.Dockerfile): the public HTTPS URL,
+    # e.g. https://cloudclean.example.ts.net. When set it also decides
+    # FRONTEND_URL, GOOGLE_REDIRECT_URI (<url>/auth/callback) and
+    # COOKIE_SECURE (true for https), so one setting can't disagree with another.
+    public_url: str = ""
+    # Folder holding the built web app (frontend/dist). When set, the API
+    # serves it too, so the browser talks to a single origin.
+    static_dir: str = ""
+
     database_url: str = f"sqlite:///{BASE_DIR / 'data' / 'cloudclean.db'}"
 
     # Default analysis thresholds (overridable per-user in UserSettings).
@@ -63,6 +73,16 @@ class Settings(BaseSettings):
     video_max_mb: int = 4096
     # Where videos are downloaded and re-encoded. Blank = the OS temp dir.
     job_temp_dir: str = ""
+
+    @model_validator(mode="after")
+    def _apply_public_url(self):
+        if self.public_url:
+            url = self.public_url.rstrip("/")
+            self.public_url = url
+            self.frontend_url = url
+            self.google_redirect_uri = f"{url}/auth/callback"
+            self.cookie_secure = url.startswith("https://")
+        return self
 
     @property
     def google_oauth_configured(self) -> bool:

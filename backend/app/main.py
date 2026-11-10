@@ -83,3 +83,35 @@ for router in (auth.router, storage.router, files.router, analysis.router, analy
 app.include_router(s3_routes.router)  # AWS S3 provider
 app.include_router(organize_routes.router)  # folder grouping by naming convention
 app.include_router(accounts_routes.router)  # linked Google accounts
+
+
+def _serve_web_app(static_dir: str) -> None:
+    """One-address deployment: serve the built web app (STATIC_DIR) next to
+    the API, so the session cookie is first-party. Registered last, so every
+    API route above wins; any other GET gets the file or the app's index.html
+    (the web app does its own routing)."""
+    from pathlib import Path
+
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    root = Path(static_dir).resolve()
+    if not (root / "index.html").is_file():
+        logger.warning("STATIC_DIR %s has no index.html; serving the API only.", root)
+        return
+    if (root / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def web_app(path: str):
+        if path.split("/", 1)[0] in ("api", "auth"):  # an unknown API path stays a 404
+            raise HTTPException(status_code=404, detail="Not found.")
+        file = (root / path).resolve()
+        if path and file.is_file() and root in file.parents:
+            return FileResponse(file)
+        return FileResponse(root / "index.html")
+
+
+if settings.static_dir:
+    _serve_web_app(settings.static_dir)

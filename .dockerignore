@@ -1,0 +1,17 @@
+# Never put secrets, local data or installed packages into an image.
+.env
+.env.*
+!.env.example
+**/client_secret*.json
+**/credentials*.json
+**/token*.json
+backend/data/*.db*
+backend/data/.secret_key
+backend/venv/
+**/__pycache__/
+**/.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+share/
+.git/
+.claude/
